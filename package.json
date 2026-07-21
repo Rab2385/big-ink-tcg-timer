@@ -1,0 +1,35 @@
+{
+  "name": "big-ink-tcg-timer",
+  "version": "1.0.0",
+  "description": "Big Ink TCG Timer",
+  "main": "main.js",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "pack-folder": "electron-builder --win dir",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "productName": "Big Ink TCG Timer",
+    "appId": "com.bigink.timer",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "build/web/**/*"
+    ],
+    "win": {
+      "target": [
+        "dir",
+        "portable"
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "latest"
+  }
+}
