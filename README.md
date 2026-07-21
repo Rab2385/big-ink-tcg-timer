@@ -387,4 +387,7 @@ Cleanup = later polish task
 ```
 
 This version is ready for continued testing and packaging as a local Windows event timer app.
-By Robert
+
+## Author
+
+Created by Robert Braun
