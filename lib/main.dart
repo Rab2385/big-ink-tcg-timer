@@ -9,7 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const storageKey = 'big_ink_tcg_timer_v1';
 const presetsStorageKey = 'big_ink_tcg_timer_presets_v1';
-const appVersion = 'V1.2.2 Alena';
+const appVersion = 'V1.2.3 Alena';
 
 void main() => runApp(const BigInkTimerApp());
 
@@ -1408,13 +1408,9 @@ class WinnerScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final first =
-        state.firstPlace.trim().isEmpty ? '1st Place' : state.firstPlace.trim();
-    final second = state.secondPlace.trim().isEmpty
-        ? '2nd Place'
-        : state.secondPlace.trim();
-    final third =
-        state.thirdPlace.trim().isEmpty ? '3rd Place' : state.thirdPlace.trim();
+    final firstName = state.firstPlace.trim();
+    final secondName = state.secondPlace.trim();
+    final thirdName = state.thirdPlace.trim();
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1425,10 +1421,10 @@ class WinnerScreen extends StatelessWidget {
         final scale = math.min(widthScale, heightScale);
         final compact = width < 900 || height < 650;
 
-        final titleSize = compact ? 44.0 : 78.0 * scale;
-        final subtitleSize = compact ? 18.0 : 28.0 * scale;
-        final podiumNameSize = compact ? 24.0 : 42.0 * scale;
-        final podiumPlaceSize = compact ? 18.0 : 26.0 * scale;
+        final titleSize = compact ? 40.0 : 70.0 * scale;
+        final subtitleSize = compact ? 16.0 : 24.0 * scale;
+        final podiumNameSize = compact ? 24.0 : 38.0 * scale;
+        final podiumPlaceSize = compact ? 16.0 : 24.0 * scale;
 
         return DecoratedBox(
           decoration: const BoxDecoration(
@@ -1494,10 +1490,10 @@ class WinnerScreen extends StatelessWidget {
                           children: [
                             Icon(
                               Icons.emoji_events,
-                              size: compact ? 74 : 128 * scale,
+                              size: compact ? 64 : 108 * scale,
                               color: const Color(0xFFFACC15),
                             ),
-                            SizedBox(height: 14 * scale),
+                            SizedBox(height: 10 * scale),
                             Text(
                               'WINNER PODIUM',
                               textAlign: TextAlign.center,
@@ -1505,10 +1501,10 @@ class WinnerScreen extends StatelessWidget {
                                 fontSize: titleSize,
                                 height: 0.95,
                                 fontWeight: FontWeight.w900,
-                                letterSpacing: -4 * scale,
+                                letterSpacing: -3.2 * scale,
                               ),
                             ),
-                            SizedBox(height: 10 * scale),
+                            SizedBox(height: 8 * scale),
                             Text(
                               'Congratulations and thank you for playing!',
                               style: TextStyle(
@@ -1517,36 +1513,49 @@ class WinnerScreen extends StatelessWidget {
                                 color: Colors.white.withOpacity(0.78),
                               ),
                             ),
-                            SizedBox(height: 34 * scale),
+                            SizedBox(height: 30 * scale),
                             Wrap(
                               alignment: WrapAlignment.center,
                               crossAxisAlignment: WrapCrossAlignment.end,
-                              spacing: 18 * scale,
+                              spacing: 22 * scale,
                               runSpacing: 18 * scale,
                               children: [
                                 PodiumCard(
-                                  place: '2nd',
-                                  name: second,
+                                  placeLabel: '2nd Place',
+                                  name: secondName.isEmpty
+                                      ? 'Winner name'
+                                      : secondName,
+                                  isPlaceholder: secondName.isEmpty,
                                   icon: Icons.looks_two,
-                                  height: compact ? 130 : 190 * scale,
+                                  width: compact ? 230 : 282 * scale,
+                                  height: compact ? 150 : 220 * scale,
                                   nameSize: podiumNameSize,
                                   placeSize: podiumPlaceSize,
                                   accent: const Color(0xFFC0C7D2),
                                 ),
                                 PodiumCard(
-                                  place: '1st',
-                                  name: first,
+                                  placeLabel: '1st Place',
+                                  name: firstName.isEmpty
+                                      ? 'Winner name'
+                                      : firstName,
+                                  isPlaceholder: firstName.isEmpty,
                                   icon: Icons.looks_one,
-                                  height: compact ? 160 : 240 * scale,
-                                  nameSize: podiumNameSize + 8 * scale,
+                                  width: compact ? 245 : 300 * scale,
+                                  height: compact ? 180 : 270 * scale,
+                                  nameSize: podiumNameSize + 7 * scale,
                                   placeSize: podiumPlaceSize,
                                   accent: const Color(0xFFFACC15),
+                                  isChampion: true,
                                 ),
                                 PodiumCard(
-                                  place: '3rd',
-                                  name: third,
+                                  placeLabel: '3rd Place',
+                                  name: thirdName.isEmpty
+                                      ? 'Winner name'
+                                      : thirdName,
+                                  isPlaceholder: thirdName.isEmpty,
                                   icon: Icons.looks_3,
-                                  height: compact ? 115 : 165 * scale,
+                                  width: compact ? 230 : 282 * scale,
+                                  height: compact ? 150 : 220 * scale,
                                   nameSize: podiumNameSize,
                                   placeSize: podiumPlaceSize,
                                   accent: const Color(0xFFFB923C),
@@ -1562,7 +1571,7 @@ class WinnerScreen extends StatelessWidget {
                     width: double.infinity,
                     padding: EdgeInsets.symmetric(
                       horizontal: 24 * scale,
-                      vertical: compact ? 14 : 22 * scale,
+                      vertical: compact ? 14 : 20 * scale,
                     ),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(24 * scale),
@@ -1572,7 +1581,7 @@ class WinnerScreen extends StatelessWidget {
                       'Congratulations to our winners — and thank you to everyone for playing!',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: compact ? 18 : 28 * scale,
+                        fontSize: compact ? 18 : 26 * scale,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -1589,58 +1598,90 @@ class WinnerScreen extends StatelessWidget {
 
 class PodiumCard extends StatelessWidget {
   const PodiumCard({
-    required this.place,
+    required this.placeLabel,
     required this.name,
+    required this.isPlaceholder,
     required this.icon,
+    required this.width,
     required this.height,
     required this.nameSize,
     required this.placeSize,
     required this.accent,
+    this.isChampion = false,
     super.key,
   });
 
-  final String place;
+  final String placeLabel;
   final String name;
+  final bool isPlaceholder;
   final IconData icon;
+  final double width;
   final double height;
   final double nameSize;
   final double placeSize;
   final Color accent;
+  final bool isChampion;
 
   @override
   Widget build(BuildContext context) {
+    final cardRadius = isChampion ? 30.0 : 26.0;
+
     return Container(
-      width: 260,
+      width: width,
       height: height,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        color: accent.withOpacity(0.14),
-        border: Border.all(color: accent.withOpacity(0.48)),
+        borderRadius: BorderRadius.circular(cardRadius),
+        color: accent.withOpacity(isChampion ? 0.18 : 0.13),
+        border: Border.all(
+          color: accent.withOpacity(isChampion ? 0.70 : 0.45),
+          width: isChampion ? 1.4 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(isChampion ? 0.16 : 0.08),
+            blurRadius: isChampion ? 28 : 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: accent, size: 42),
-          const SizedBox(height: 8),
           Text(
-            place,
+            placeLabel,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: accent,
               fontSize: placeSize,
               fontWeight: FontWeight.w900,
             ),
           ),
-          const SizedBox(height: 10),
-          Text(
-            name,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: nameSize,
-              height: 1.0,
-              fontWeight: FontWeight.w900,
+          const SizedBox(height: 12),
+          Expanded(
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: SizedBox(
+                  width: width - 44,
+                  child: Text(
+                    name,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: nameSize,
+                      height: 1.02,
+                      fontWeight:
+                          isPlaceholder ? FontWeight.w700 : FontWeight.w900,
+                      color: isPlaceholder
+                          ? Colors.white.withOpacity(0.55)
+                          : Colors.white,
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ],
@@ -2202,7 +2243,7 @@ class TimerStateModel {
     return TimerStateModel(
       eventName: 'Lorcana Weekly League',
       game: 'Disney Lorcana',
-      matchFormat: 'BO3',
+      matchFormat: 'BO1',
       roundLengthMinutes: 50,
       currentRound: 1,
       totalRounds: 6,
@@ -2273,7 +2314,7 @@ class TimerStateModel {
 
   String get status {
     if (eventFinished) return 'FINISHED';
-    if (remainingNow <= 0) return 'TIME';
+    if (remainingNow <= 0) return 'TIME CALLED';
     return running ? 'RUNNING' : 'PAUSED';
   }
 
