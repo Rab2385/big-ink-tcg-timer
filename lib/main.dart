@@ -668,115 +668,141 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      colorSchemeSeed: const Color(0xFF5FB3FF),
-      scaffoldBackgroundColor: const Color(0xFF071120),
-      fontFamily: 'Arial',
-    );
+    final pages = [
+      AdminTimerPage(
+        key: const ValueKey('timer'),
+        state: state,
+        eventName: eventName,
+        roundLength: roundLength,
+        currentRound: currentRound,
+        totalRounds: totalRounds,
+        tableRange: tableRange,
+        tableCount: tableCount,
+        firstPlace: firstPlace,
+        secondPlace: secondPlace,
+        thirdPlace: thirdPlace,
+        onApplyReset: () => applySettings(resetTimer: true),
+        onApplySave: () => applySettings(resetTimer: false),
+        onGameChanged: changeGame,
+        onMatchFormatChanged: changeMatchFormat,
+        onUseCustomLogoChanged: changeLogoMode,
+        onToggle: toggleTimer,
+        onAddFive: addFiveMinutes,
+        onReset: resetTimer,
+        onNextRound: nextRound,
+        onFinishEvent: finishEventManually,
+      ),
+      PlayerScreen(
+        key: const ValueKey('player'),
+        state: state,
+      ),
+      TablesPage(
+        key: const ValueKey('tables'),
+        state: state,
+      ),
+      PresetsPage(
+        key: const ValueKey('presets'),
+        presets: presets,
+        onLoadPreset: loadPreset,
+        onSaveCurrentPreset: saveCurrentSetupAsPreset,
+        onCreatePreset: createPreset,
+        onUpdatePreset: updatePreset,
+        onDeletePreset: deletePreset,
+        onRestoreDefaults: restoreDefaultPresets,
+      ),
+    ];
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Big Ink TCG Timer',
-      theme: theme,
+      theme: buildAppTheme(),
       home: playerOnly
           ? PlayerScreen(state: state)
           : Scaffold(
-              body: Focus(
-                focusNode: keyboardFocusNode,
-                autofocus: true,
-                onKeyEvent: handleKeyboard,
-                child: SafeArea(
-                  child: Row(
-                    children: [
-                      if (page != 1)
-                        NavigationRail(
-                          selectedIndex: page,
-                          extended: MediaQuery.of(context).size.width > 1050,
-                          onDestinationSelected: (value) {
-                            if (value == 1) {
-                              openPlayerScreenFullscreen();
-                            } else {
-                              setState(() => page = value);
-                            }
-                          },
-                          backgroundColor: Colors.black.withOpacity(0.25),
-                          destinations: const [
-                            NavigationRailDestination(
-                              icon: Icon(Icons.timer_outlined),
-                              selectedIcon: Icon(Icons.timer),
-                              label: Text('Timer'),
-                            ),
-                            NavigationRailDestination(
-                              icon: Icon(Icons.tv_outlined),
-                              selectedIcon: Icon(Icons.tv),
-                              label: Text('Player Screen'),
-                            ),
-                            NavigationRailDestination(
-                              icon: Icon(Icons.grid_view_outlined),
-                              selectedIcon: Icon(Icons.grid_view),
-                              label: Text('Tables'),
-                            ),
-                            NavigationRailDestination(
-                              icon: Icon(Icons.event_outlined),
-                              selectedIcon: Icon(Icons.event),
-                              label: Text('Presets'),
-                            ),
-                          ],
-                        ),
-                      Expanded(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 200),
-                          child: [
-                            AdminTimerPage(
-                              key: const ValueKey('timer'),
-                              state: state,
-                              eventName: eventName,
-                              roundLength: roundLength,
-                              currentRound: currentRound,
-                              totalRounds: totalRounds,
-                              tableRange: tableRange,
-                              tableCount: tableCount,
-                              firstPlace: firstPlace,
-                              secondPlace: secondPlace,
-                              thirdPlace: thirdPlace,
-                              onApplyReset: () =>
-                                  applySettings(resetTimer: true),
-                              onApplySave: () =>
-                                  applySettings(resetTimer: false),
-                              onGameChanged: changeGame,
-                              onMatchFormatChanged: changeMatchFormat,
-                              onUseCustomLogoChanged: changeLogoMode,
-                              onToggle: toggleTimer,
-                              onAddFive: addFiveMinutes,
-                              onReset: resetTimer,
-                              onNextRound: nextRound,
-                              onFinishEvent: finishEventManually,
-                            ),
-                            PlayerScreen(
-                              key: const ValueKey('player'),
-                              state: state,
-                            ),
-                            TablesPage(
-                              key: const ValueKey('tables'),
-                              state: state,
-                            ),
-                            PresetsPage(
-                              key: const ValueKey('presets'),
-                              presets: presets,
-                              onLoadPreset: loadPreset,
-                              onSaveCurrentPreset: saveCurrentSetupAsPreset,
-                              onCreatePreset: createPreset,
-                              onUpdatePreset: updatePreset,
-                              onDeletePreset: deletePresetDirect,
-                              onRestoreDefaults: restoreDefaultPresetsDirect,
-                            ),
-                          ][page],
-                        ),
-                      ),
+              backgroundColor: Colors.transparent,
+              body: DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFF060816),
+                      Color(0xFF0B1020),
+                      Color(0xFF11152A)
                     ],
                   ),
+                ),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: AnimatedBackdrop(accent: state.timerColor),
+                    ),
+                    Focus(
+                      focusNode: keyboardFocusNode,
+                      autofocus: true,
+                      onKeyEvent: handleKeyboard,
+                      child: SafeArea(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final stacked = constraints.maxWidth < 1080;
+                            return stacked
+                                ? Column(
+                                    children: [
+                                      TournamentNavigation(
+                                        compact: true,
+                                        selectedIndex: page,
+                                        state: state,
+                                        onSelected: (value) {
+                                          if (value == 1) {
+                                            openPlayerScreenFullscreen();
+                                            return;
+                                          }
+                                          setState(() => page = value);
+                                        },
+                                      ),
+                                      Expanded(
+                                        child: AnimatedSwitcher(
+                                          duration: const Duration(
+                                            milliseconds: 350,
+                                          ),
+                                          switchInCurve: Curves.easeOutCubic,
+                                          switchOutCurve: Curves.easeInCubic,
+                                          child: pages[page],
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Row(
+                                    children: [
+                                      if (page != 1)
+                                        TournamentNavigation(
+                                          selectedIndex: page,
+                                          state: state,
+                                          onSelected: (value) {
+                                            if (value == 1) {
+                                              openPlayerScreenFullscreen();
+                                              return;
+                                            }
+                                            setState(() => page = value);
+                                          },
+                                        ),
+                                      Expanded(
+                                        child: AnimatedSwitcher(
+                                          duration: const Duration(
+                                            milliseconds: 350,
+                                          ),
+                                          switchInCurve: Curves.easeOutCubic,
+                                          switchOutCurve: Curves.easeInCubic,
+                                          child: pages[page],
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -834,286 +860,308 @@ class AdminTimerPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return PageScaffold(
       title: 'Timer Control',
-      subtitle: 'Admin screen for your TCG event · $appVersion',
+      subtitle:
+          'Run rounds with a polished tournament dashboard built for TCG nights, leagues, and store championships.',
+      accent: state.timerColor,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final wide = constraints.maxWidth > 950;
+          final wide = constraints.maxWidth > 1080;
+          final leftWidth =
+              wide ? constraints.maxWidth * 0.60 - 12 : constraints.maxWidth;
+          final rightWidth =
+              wide ? constraints.maxWidth * 0.40 - 12 : constraints.maxWidth;
+
           return Wrap(
-            spacing: 18,
-            runSpacing: 18,
+            spacing: 24,
+            runSpacing: 24,
             children: [
               SizedBox(
-                width: wide
-                    ? constraints.maxWidth * 0.57 - 10
-                    : constraints.maxWidth,
-                child: AppCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                width: leftWidth,
+                child: Column(
+                  children: [
+                    HeroTimerCard(
+                      state: state,
+                      onToggle: onToggle,
+                      onAddFive: onAddFive,
+                      onReset: onReset,
+                      onNextRound: onNextRound,
+                      onFinishEvent: onFinishEvent,
+                    ),
+                    const SizedBox(height: 24),
+                    AppCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Text(
-                              state.eventName,
-                              style: const TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w900,
+                          const SectionHeading(
+                            eyebrow: 'Tournament flow',
+                            title: 'Round timeline',
+                            subtitle:
+                                'Players can read the current round, match format, and table zone at a glance.',
+                          ),
+                          const SizedBox(height: 20),
+                          Wrap(
+                            spacing: 16,
+                            runSpacing: 16,
+                            children: [
+                              MetricTile(
+                                icon: Icons.style_outlined,
+                                label: 'Format',
+                                value: state.matchFormat,
+                                accent: const Color(0xFF8B5CF6),
                               ),
-                            ),
+                              MetricTile(
+                                icon: Icons.timer_outlined,
+                                label: 'Round length',
+                                value: '${state.roundLengthMinutes} min',
+                                accent: const Color(0xFF22D3EE),
+                              ),
+                              MetricTile(
+                                icon: Icons.stadium_outlined,
+                                label: 'Tables in play',
+                                value: state.tableRange,
+                                accent: const Color(0xFFF97316),
+                              ),
+                              MetricTile(
+                                icon: Icons.emoji_events_outlined,
+                                label: 'Stage',
+                                value: state.stageLabel,
+                                accent: state.statusColor,
+                              ),
+                            ],
                           ),
-                          StatusBadge(
-                            text: state.status,
-                            color: state.statusColor,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        state.eventFinished
-                            ? '${state.game} · ${state.matchFormat} · EVENT FINISHED · Tables ${state.tableRange}'
-                            : '${state.game} · ${state.matchFormat} · Round ${state.currentRound}/${state.totalRounds} · Tables ${state.tableRange}',
-                        style: softText,
-                      ),
-                      if (state.isFinalRound && !state.eventFinished) ...[
-                        const SizedBox(height: 10),
-                        const FinalRoundNotice(),
-                      ],
-                      if (state.eventFinished) ...[
-                        const SizedBox(height: 10),
-                        const EventFinishedNotice(),
-                      ],
-                      const SizedBox(height: 36),
-                      Center(
-                        child: FittedBox(
-                          child: Text(
-                            state.eventFinished
-                                ? 'DONE'
-                                : formatSeconds(state.remainingNow),
-                            style: TextStyle(
-                              fontSize: 130,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -8,
-                              color: state.timerColor,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 26),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        children: [
-                          FilledButton.icon(
-                            onPressed: onToggle,
-                            icon: Icon(
-                              state.running ? Icons.pause : Icons.play_arrow,
-                            ),
-                            label: Text(state.running ? 'Pause' : 'Start'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: onAddFive,
-                            icon: const Icon(Icons.add),
-                            label: const Text('+5 Min'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: onNextRound,
-                            icon: const Icon(Icons.skip_next),
-                            label: const Text('Next Round'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: onFinishEvent,
-                            icon: const Icon(Icons.emoji_events_outlined),
-                            label: const Text('Finish Event'),
+                          const SizedBox(height: 18),
+                          StatusNotice(
+                            icon: state.eventFinished
+                                ? Icons.workspace_premium_outlined
+                                : state.isFinalRound
+                                    ? Icons.priority_high_rounded
+                                    : Icons.campaign_outlined,
+                            title: state.eventFinished
+                                ? 'Winner screen live'
+                                : state.isFinalRound
+                                    ? 'Final round spotlight'
+                                    : 'Tournament ready',
+                            message: state.eventFinished
+                                ? 'The player display has switched to the podium presentation.'
+                                : state.isFinalRound
+                                    ? 'Use Finish Event after standings are final to celebrate the podium.'
+                                    : 'Save changes any time, then launch the fullscreen player view for the venue display.',
+                            accent: state.statusColor,
                           ),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
               SizedBox(
-                width: wide
-                    ? constraints.maxWidth * 0.43 - 10
-                    : constraints.maxWidth,
-                child: AppCard(
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: eventName,
-                        decoration:
-                            const InputDecoration(labelText: 'Event name'),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        value: state.game,
-                        decoration: const InputDecoration(labelText: 'Game'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'Disney Lorcana',
-                            child: Text('Disney Lorcana'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Pokémon',
-                            child: Text('Pokémon'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Magic Commander',
-                            child: Text('Magic Commander'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Yu-Gi-Oh!',
-                            child: Text('Yu-Gi-Oh!'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Random',
-                            child: Text('Random'),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) onGameChanged(value);
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        value: normalizeMatchFormat(state.matchFormat),
-                        decoration:
-                            const InputDecoration(labelText: 'Match format'),
-                        items: matchFormatOptions
-                            .map(
-                              (format) => DropdownMenuItem(
-                                value: format,
-                                child: Text(format),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) onMatchFormatChanged(value);
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: roundLength,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Round length in minutes',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
+                width: rightWidth,
+                child: Column(
+                  children: [
+                    AppCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: TextField(
-                              controller: currentRound,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Current round',
-                              ),
+                          const SectionHeading(
+                            eyebrow: 'Event setup',
+                            title: 'Control deck',
+                            subtitle:
+                                'Tune the event identity, round structure, and table layout before each tournament.',
+                          ),
+                          const SizedBox(height: 20),
+                          TextField(
+                            controller: eventName,
+                            decoration: const InputDecoration(
+                              labelText: 'Event name',
+                              prefixIcon: Icon(Icons.auto_awesome),
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: totalRounds,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Total rounds',
+                          const SizedBox(height: 14),
+                          DropdownButtonFormField<String>(
+                            value: state.game,
+                            decoration: const InputDecoration(
+                              labelText: 'Game',
+                              prefixIcon: Icon(Icons.style_outlined),
+                            ),
+                            items: gameOptions
+                                .map(
+                                  (game) => DropdownMenuItem(
+                                    value: game,
+                                    child: Text(game),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (value) {
+                              if (value != null) onGameChanged(value);
+                            },
+                          ),
+                          const SizedBox(height: 14),
+                          DropdownButtonFormField<String>(
+                            value: normalizeMatchFormat(state.matchFormat),
+                            decoration: const InputDecoration(
+                              labelText: 'Match format',
+                              prefixIcon: Icon(Icons.layers_outlined),
+                            ),
+                            items: matchFormatOptions
+                                .map(
+                                  (format) => DropdownMenuItem(
+                                    value: format,
+                                    child: Text(format),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (value) {
+                              if (value != null) onMatchFormatChanged(value);
+                            },
+                          ),
+                          const SizedBox(height: 14),
+                          TextField(
+                            controller: roundLength,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Round length in minutes',
+                              prefixIcon: Icon(Icons.hourglass_bottom_outlined),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: currentRound,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Current round',
+                                    prefixIcon: Icon(Icons.flag_outlined),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: TextField(
+                                  controller: totalRounds,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Total rounds',
+                                    prefixIcon:
+                                        Icon(Icons.format_list_numbered),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          TextField(
+                            controller: tableRange,
+                            decoration: const InputDecoration(
+                              labelText: 'Tables used',
+                              hintText: '1-12 or 1-6,9-12',
+                              prefixIcon: Icon(Icons.grid_view_rounded),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          TextField(
+                            controller: tableCount,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Total tables in store',
+                              prefixIcon: Icon(Icons.table_restaurant_outlined),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Use custom logo PNG',
+                              style: TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                            subtitle: const Text(
+                              'Keep the default BI badge or switch to your venue graphic.',
+                              style: softText,
+                            ),
+                            value: state.useCustomLogo,
+                            onChanged: onUseCustomLogoChanged,
+                          ),
+                          const SizedBox(height: 18),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              FilledButton.icon(
+                                onPressed: onApplyReset,
+                                icon: const Icon(Icons.refresh_rounded),
+                                label: const Text('Apply & Reset Timer'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: onApplySave,
+                                icon: const Icon(Icons.save_outlined),
+                                label: const Text('Save Without Reset'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    AppCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SectionHeading(
+                            eyebrow: 'Podium setup',
+                            title: 'Winner presentation',
+                            subtitle:
+                                'Prepare the champion, runner-up, and third place names before you switch to the closing screen.',
+                          ),
+                          const SizedBox(height: 18),
+                          TextField(
+                            controller: firstPlace,
+                            decoration: const InputDecoration(
+                              labelText: '1st place',
+                              prefixIcon: Icon(Icons.looks_one_outlined),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: secondPlace,
+                            decoration: const InputDecoration(
+                              labelText: '2nd place',
+                              prefixIcon: Icon(Icons.looks_two_outlined),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: thirdPlace,
+                            decoration: const InputDecoration(
+                              labelText: '3rd place',
+                              prefixIcon: Icon(Icons.looks_3_outlined),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(22),
+                              gradient: const LinearGradient(
+                                colors: [Color(0x22F59E0B), Color(0x22F97316)],
+                              ),
+                              border: Border.all(
+                                color: const Color(0x44F8B84E),
+                              ),
+                            ),
+                            child: const Text(
+                              'The winner screen becomes a premium closing slide with glowing podium cards and animated lighting.',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: tableRange,
-                        decoration: const InputDecoration(
-                          labelText: 'Tables used',
-                          hintText: '1-12 or 1-6,9-12',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: tableCount,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Total tables in store',
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text(
-                          'Use custom logo PNG',
-                          style: TextStyle(fontWeight: FontWeight.w900),
-                        ),
-                        subtitle: const Text(
-                          'Off = BI logo. On = Big Ink logo.',
-                          style: softText,
-                        ),
-                        value: state.useCustomLogo,
-                        onChanged: onUseCustomLogoChanged,
-                      ),
-                      const SizedBox(height: 18),
-                      const Divider(),
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Winner Screen',
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Enter the top 3 players manually. They will be displayed after the event is finished.',
-                        style: softText,
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: firstPlace,
-                        decoration: const InputDecoration(
-                          labelText: '1st place',
-                          prefixIcon: Icon(Icons.looks_one_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: secondPlace,
-                        decoration: const InputDecoration(
-                          labelText: '2nd place',
-                          prefixIcon: Icon(Icons.looks_two_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: thirdPlace,
-                        decoration: const InputDecoration(
-                          labelText: '3rd place',
-                          prefixIcon: Icon(Icons.looks_3_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: onApplyReset,
-                          icon: const Icon(Icons.check),
-                          label: const Text('Apply & Reset Timer'),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: onApplySave,
-                          icon: const Icon(Icons.save),
-                          label: const Text('Save Without Reset'),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1157,8 +1205,6 @@ class PlayerScreen extends StatelessWidget {
         final logoSize = compact ? 52.0 : 74.0 * scale;
         final headerTitleSize = compact ? 20.0 : 28.0 * scale;
         final eventNameSize = compact ? 42.0 : 78.0 * scale;
-        final roundSize = compact ? 18.0 : 24.0 * scale;
-
         // Main timer size.
         // This is the most important number for readability from far away.
         final timerSize = remaining <= 0
@@ -1171,171 +1217,173 @@ class PlayerScreen extends StatelessWidget {
         return DecoratedBox(
           decoration: BoxDecoration(
             gradient: RadialGradient(
-              center: Alignment.topLeft,
-              radius: 1.45,
+              center: Alignment.topCenter,
+              radius: 1.2,
               colors: [
                 state.timerColor.withOpacity(0.28),
-                const Color(0xFF06101F),
+                const Color(0xFF05070F),
               ],
             ),
           ),
-          child: Padding(
-            padding: EdgeInsets.all(outerPadding),
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(borderRadius),
-                border: Border.all(color: Colors.white.withOpacity(0.14)),
-                color: Colors.white.withOpacity(0.07),
-              ),
-              padding: EdgeInsets.all(innerPadding),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      BigInkLogo(
-                        size: logoSize,
-                        useCustomLogo: state.useCustomLogo,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                  child: AnimatedBackdrop(accent: state.timerColor)),
+              Padding(
+                padding: EdgeInsets.all(outerPadding),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(borderRadius),
+                    border: Border.all(color: Colors.white.withOpacity(0.12)),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xD9121830), Color(0xD50A1023)],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: state.timerColor.withOpacity(0.20),
+                        blurRadius: 60,
+                        offset: const Offset(0, 28),
                       ),
-                      SizedBox(width: 18 * scale),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'EVENT TIMER',
-                              style: TextStyle(
-                                fontSize: headerTitleSize,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            Text(
-                              '${state.game} · Tables ${state.tableRange}',
-                              style: softText.copyWith(
-                                fontSize: compact ? 13 : 16 * scale,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (!compact)
-                        StatusBadge(
-                          text: state.status,
-                          color: state.statusColor,
-                        ),
                     ],
                   ),
-                  Expanded(
-                    child: Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: width * 0.86,
-                              ),
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  state.eventName,
-                                  textAlign: TextAlign.center,
-                                  maxLines: 1,
-                                  style: TextStyle(
-                                    fontSize: eventNameSize,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: -4 * scale,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            SizedBox(height: 18 * scale),
-                            Wrap(
-                              alignment: WrapAlignment.center,
-                              spacing: 10 * scale,
-                              runSpacing: 10 * scale,
+                  padding: EdgeInsets.all(innerPadding),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          BigInkLogo(
+                            size: logoSize,
+                            useCustomLogo: state.useCustomLogo,
+                          ),
+                          SizedBox(width: 18 * scale),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Chip(
-                                  label: Text(
-                                    'ROUND ${state.currentRound} / ${state.totalRounds}',
-                                    style: TextStyle(
-                                      fontSize: roundSize,
-                                      fontWeight: FontWeight.w900,
-                                    ),
+                                Text(
+                                  'TOURNAMENT TIMER',
+                                  style: TextStyle(
+                                    fontSize: headerTitleSize,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.4,
                                   ),
                                 ),
-                                Chip(
-                                  label: Text(
-                                    normalizeMatchFormat(state.matchFormat),
-                                    style: TextStyle(
-                                      fontSize: roundSize,
-                                      fontWeight: FontWeight.w900,
-                                    ),
+                                Text(
+                                  '${state.game} · Tables ${state.tableRange}',
+                                  style: softText.copyWith(
+                                    fontSize: compact ? 13 : 16 * scale,
                                   ),
                                 ),
                               ],
                             ),
-                            SizedBox(height: 26 * scale),
-                            Text(
-                              remaining <= 0
-                                  ? 'TIME CALLED'
-                                  : formatSeconds(remaining),
-                              style: TextStyle(
-                                fontSize: timerSize,
-                                height: 0.82,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing:
-                                    remaining <= 0 ? -7 * scale : -14 * scale,
-                                color: state.timerColor,
+                          ),
+                          if (!compact)
+                            StatusBadge(
+                              text: state.status,
+                              color: state.statusColor,
+                            ),
+                        ],
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: width * 0.88),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxWidth: width * 0.86,
+                                    ),
+                                    child: Text(
+                                      state.eventName,
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: eventNameSize,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -3.5 * scale,
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(height: 18 * scale),
+                                  Wrap(
+                                    alignment: WrapAlignment.center,
+                                    spacing: 12 * scale,
+                                    runSpacing: 12 * scale,
+                                    children: [
+                                      ScreenStatPill(
+                                        icon: Icons.flag_outlined,
+                                        label:
+                                            'ROUND ${state.currentRound} / ${state.totalRounds}',
+                                      ),
+                                      ScreenStatPill(
+                                        icon: Icons.style_outlined,
+                                        label: normalizeMatchFormat(
+                                          state.matchFormat,
+                                        ),
+                                      ),
+                                      ScreenStatPill(
+                                        icon: Icons.table_restaurant_outlined,
+                                        label: 'TABLES ${state.tableRange}',
+                                      ),
+                                    ],
+                                  ),
+                                  SizedBox(height: 26 * scale),
+                                  TimeControlDisplay(
+                                    state: state,
+                                    size: compact ? 320 : 540 * scale,
+                                    headlineSize: timerSize,
+                                  ),
+                                  SizedBox(height: 18 * scale),
+                                  Text(
+                                    state.playerHeadline,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: statusTextSize,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            SizedBox(height: 18 * scale),
-                            Text(
-                              remaining <= 0
-                                  ? 'Please finish your current turn'
-                                  : state.isFinalRound
-                                      ? 'Final round in progress'
-                                      : remaining <= 300
-                                          ? 'Final five minutes'
-                                          : 'Round in progress',
-                              style: TextStyle(
-                                fontSize: statusTextSize,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  Container(
-                    width: double.infinity,
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 24 * scale,
-                      vertical: compact ? 14 : 22 * scale,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24 * scale),
-                      color: Colors.black.withOpacity(0.18),
-                    ),
-                    child: Text(
-                      remaining <= 0
-                          ? 'Time has been called. Finish the current turn according to event rules, then report your result.'
-                          : state.isFinalRound
-                              ? 'Final round — good luck, have fun, and report your final result after the round.'
-                              : 'Good luck, have fun — please report your result after the round.',
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: instructionTextSize,
-                        fontWeight: FontWeight.w900,
+                      Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 24 * scale,
+                          vertical: compact ? 14 : 22 * scale,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(24 * scale),
+                          color: Colors.white.withOpacity(0.06),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.10),
+                          ),
+                        ),
+                        child: Text(
+                          state.playerMessage,
+                          textAlign: TextAlign.center,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: instructionTextSize,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         );
       },
@@ -1348,26 +1396,12 @@ class FinalRoundNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: const Color(0xFFFACC15).withOpacity(0.12),
-        border: Border.all(color: const Color(0xFFFACC15).withOpacity(0.42)),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.warning_amber_rounded, color: Color(0xFFFACC15)),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Final Round — use the Finish Event button when you are ready to show the winner screen.',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-        ],
-      ),
+    return const StatusNotice(
+      icon: Icons.warning_amber_rounded,
+      title: 'Final round ready',
+      message:
+          'Use Finish Event when pairings and standings are complete to switch the venue screen to the winner podium.',
+      accent: Color(0xFFFACC15),
     );
   }
 }
@@ -1377,26 +1411,12 @@ class EventFinishedNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: const Color(0xFF5FB3FF).withOpacity(0.12),
-        border: Border.all(color: const Color(0xFF5FB3FF).withOpacity(0.42)),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.emoji_events_outlined, color: Color(0xFF5FB3FF)),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Event Finished — the Player Screen now shows the winner podium.',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-        ],
-      ),
+    return const StatusNotice(
+      icon: Icons.emoji_events_outlined,
+      title: 'Closing scene live',
+      message:
+          'The player display is now presenting the podium view for the final standings.',
+      accent: Color(0xFF38BDF8),
     );
   }
 }
@@ -1429,166 +1449,202 @@ class WinnerScreen extends StatelessWidget {
         return DecoratedBox(
           decoration: const BoxDecoration(
             gradient: RadialGradient(
-              center: Alignment.topLeft,
-              radius: 1.45,
-              colors: [Color(0x5538BDF8), Color(0xFF06101F)],
+              center: Alignment.topCenter,
+              radius: 1.3,
+              colors: [Color(0x66F59E0B), Color(0xFF05070F)],
             ),
           ),
-          child: Padding(
-            padding: EdgeInsets.all(compact ? 14 : 28 * scale),
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(34 * scale),
-                border: Border.all(color: Colors.white.withOpacity(0.14)),
-                color: Colors.white.withOpacity(0.07),
+          child: Stack(
+            children: [
+              const Positioned.fill(
+                child: AnimatedBackdrop(accent: Color(0xFFFACC15)),
               ),
-              padding: EdgeInsets.all(compact ? 22 : 42 * scale),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      BigInkLogo(
-                        size: compact ? 52 : 74 * scale,
-                        useCustomLogo: state.useCustomLogo,
-                      ),
-                      SizedBox(width: 18 * scale),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'EVENT FINISHED',
-                              style: TextStyle(
-                                fontSize: compact ? 20 : 28 * scale,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            Text(
-                              '${state.eventName} · ${state.game}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: softText.copyWith(
-                                fontSize: compact ? 13 : 16 * scale,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (!compact)
-                        const StatusBadge(
-                          text: 'WINNERS',
-                          color: Color(0xFFFACC15),
-                        ),
-                    ],
+              Padding(
+                padding: EdgeInsets.all(compact ? 14 : 28 * scale),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(34 * scale),
+                    border: Border.all(color: Colors.white.withOpacity(0.14)),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xE4191120), Color(0xE00B1023)],
+                    ),
                   ),
-                  Expanded(
-                    child: Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.emoji_events,
-                              size: compact ? 64 : 108 * scale,
-                              color: const Color(0xFFFACC15),
-                            ),
-                            SizedBox(height: 10 * scale),
-                            Text(
-                              'WINNER PODIUM',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: titleSize,
-                                height: 0.95,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -3.2 * scale,
-                              ),
-                            ),
-                            SizedBox(height: 8 * scale),
-                            Text(
-                              'Congratulations and thank you for playing!',
-                              style: TextStyle(
-                                fontSize: subtitleSize,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white.withOpacity(0.78),
-                              ),
-                            ),
-                            SizedBox(height: 30 * scale),
-                            Wrap(
-                              alignment: WrapAlignment.center,
-                              crossAxisAlignment: WrapCrossAlignment.end,
-                              spacing: 22 * scale,
-                              runSpacing: 18 * scale,
+                  padding: EdgeInsets.all(compact ? 22 : 42 * scale),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          BigInkLogo(
+                            size: compact ? 52 : 74 * scale,
+                            useCustomLogo: state.useCustomLogo,
+                          ),
+                          SizedBox(width: 18 * scale),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                PodiumCard(
-                                  placeLabel: '2nd Place',
-                                  name: secondName.isEmpty
-                                      ? 'Winner name'
-                                      : secondName,
-                                  isPlaceholder: secondName.isEmpty,
-                                  icon: Icons.looks_two,
-                                  width: compact ? 230 : 282 * scale,
-                                  height: compact ? 150 : 220 * scale,
-                                  nameSize: podiumNameSize,
-                                  placeSize: podiumPlaceSize,
-                                  accent: const Color(0xFFC0C7D2),
+                                Text(
+                                  'EVENT FINISHED',
+                                  style: TextStyle(
+                                    fontSize: compact ? 20 : 28 * scale,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.2,
+                                  ),
                                 ),
-                                PodiumCard(
-                                  placeLabel: '1st Place',
-                                  name: firstName.isEmpty
-                                      ? 'Winner name'
-                                      : firstName,
-                                  isPlaceholder: firstName.isEmpty,
-                                  icon: Icons.looks_one,
-                                  width: compact ? 245 : 300 * scale,
-                                  height: compact ? 180 : 270 * scale,
-                                  nameSize: podiumNameSize + 7 * scale,
-                                  placeSize: podiumPlaceSize,
-                                  accent: const Color(0xFFFACC15),
-                                  isChampion: true,
-                                ),
-                                PodiumCard(
-                                  placeLabel: '3rd Place',
-                                  name: thirdName.isEmpty
-                                      ? 'Winner name'
-                                      : thirdName,
-                                  isPlaceholder: thirdName.isEmpty,
-                                  icon: Icons.looks_3,
-                                  width: compact ? 230 : 282 * scale,
-                                  height: compact ? 150 : 220 * scale,
-                                  nameSize: podiumNameSize,
-                                  placeSize: podiumPlaceSize,
-                                  accent: const Color(0xFFFB923C),
+                                Text(
+                                  '${state.eventName} · ${state.game}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: softText.copyWith(
+                                    fontSize: compact ? 13 : 16 * scale,
+                                  ),
                                 ),
                               ],
                             ),
-                          ],
+                          ),
+                          if (!compact)
+                            const StatusBadge(
+                              text: 'PODIUM',
+                              color: Color(0xFFFACC15),
+                            ),
+                        ],
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: compact ? 96 : 132 * scale,
+                                  height: compact ? 96 : 132 * scale,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    gradient: const RadialGradient(
+                                      colors: [
+                                        Color(0x55FACC15),
+                                        Color(0x11FACC15),
+                                      ],
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: const Color(0xFFFACC15)
+                                            .withOpacity(0.30),
+                                        blurRadius: 34,
+                                        spreadRadius: 6,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Icon(
+                                    Icons.workspace_premium,
+                                    size: compact ? 54 : 74 * scale,
+                                    color: const Color(0xFFFACC15),
+                                  ),
+                                ),
+                                SizedBox(height: 14 * scale),
+                                Text(
+                                  'WINNER PODIUM',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: titleSize,
+                                    height: 0.95,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: -3.2 * scale,
+                                  ),
+                                ),
+                                SizedBox(height: 8 * scale),
+                                Text(
+                                  'Congratulations and thank you for playing!',
+                                  style: TextStyle(
+                                    fontSize: subtitleSize,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white.withOpacity(0.78),
+                                  ),
+                                ),
+                                SizedBox(height: 30 * scale),
+                                Wrap(
+                                  alignment: WrapAlignment.center,
+                                  crossAxisAlignment: WrapCrossAlignment.end,
+                                  spacing: 22 * scale,
+                                  runSpacing: 18 * scale,
+                                  children: [
+                                    PodiumCard(
+                                      placeLabel: '2nd Place',
+                                      name: secondName.isEmpty
+                                          ? 'Runner-up'
+                                          : secondName,
+                                      isPlaceholder: secondName.isEmpty,
+                                      icon: Icons.workspace_premium_outlined,
+                                      width: compact ? 230 : 282 * scale,
+                                      height: compact ? 170 : 238 * scale,
+                                      nameSize: podiumNameSize,
+                                      placeSize: podiumPlaceSize,
+                                      accent: const Color(0xFFCBD5E1),
+                                    ),
+                                    PodiumCard(
+                                      placeLabel: '1st Place',
+                                      name: firstName.isEmpty
+                                          ? 'Champion'
+                                          : firstName,
+                                      isPlaceholder: firstName.isEmpty,
+                                      icon: Icons.emoji_events,
+                                      width: compact ? 245 : 300 * scale,
+                                      height: compact ? 210 : 296 * scale,
+                                      nameSize: podiumNameSize + 7 * scale,
+                                      placeSize: podiumPlaceSize,
+                                      accent: const Color(0xFFFACC15),
+                                      isChampion: true,
+                                    ),
+                                    PodiumCard(
+                                      placeLabel: '3rd Place',
+                                      name: thirdName.isEmpty
+                                          ? 'Top cut'
+                                          : thirdName,
+                                      isPlaceholder: thirdName.isEmpty,
+                                      icon: Icons.military_tech_outlined,
+                                      width: compact ? 230 : 282 * scale,
+                                      height: compact ? 170 : 238 * scale,
+                                      nameSize: podiumNameSize,
+                                      placeSize: podiumPlaceSize,
+                                      accent: const Color(0xFFFB923C),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  Container(
-                    width: double.infinity,
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 24 * scale,
-                      vertical: compact ? 14 : 20 * scale,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24 * scale),
-                      color: Colors.black.withOpacity(0.18),
-                    ),
-                    child: Text(
-                      'Congratulations to our winners — and thank you to everyone for playing!',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: compact ? 18 : 26 * scale,
-                        fontWeight: FontWeight.w900,
+                      Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 24 * scale,
+                          vertical: compact ? 14 : 20 * scale,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(24 * scale),
+                          color: Colors.white.withOpacity(0.06),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.10),
+                          ),
+                        ),
+                        child: Text(
+                          'Celebrate the finalists, thank your community, and get ready for the next tournament night.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: compact ? 18 : 26 * scale,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         );
       },
@@ -1632,7 +1688,14 @@ class PodiumCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(cardRadius),
-        color: accent.withOpacity(isChampion ? 0.18 : 0.13),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            accent.withOpacity(isChampion ? 0.24 : 0.18),
+            accent.withOpacity(0.05),
+          ],
+        ),
         border: Border.all(
           color: accent.withOpacity(isChampion ? 0.70 : 0.45),
           width: isChampion ? 1.4 : 1.0,
@@ -1647,6 +1710,8 @@ class PodiumCard extends StatelessWidget {
       ),
       child: Column(
         children: [
+          Icon(icon, color: accent, size: isChampion ? 34 : 28),
+          const SizedBox(height: 10),
           Text(
             placeLabel,
             textAlign: TextAlign.center,
@@ -1699,47 +1764,118 @@ class TablesPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return PageScaffold(
       title: 'Tables',
-      subtitle: 'Blue/Yellow/Red = event tables. Green = free tables.',
-      child: AppCard(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final columns = constraints.maxWidth > 1000
-                ? 8
-                : constraints.maxWidth > 650
-                    ? 6
-                    : 3;
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: state.tableCount,
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: columns,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.35,
+      subtitle:
+          'Highlight tournament zones with a cleaner venue map and live color coding.',
+      accent: state.timerColor,
+      child: Column(
+        children: [
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              MetricTile(
+                icon: Icons.table_bar_outlined,
+                label: 'Total tables',
+                value: '${state.tableCount}',
+                accent: const Color(0xFF22D3EE),
               ),
-              itemBuilder: (context, index) {
-                final table = index + 1;
-                final active = state.tableIsActive(table);
-                final color =
-                    active ? state.timerColor : const Color(0xFF4ADE80);
-                return DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
-                    color: color.withOpacity(active ? 0.22 : 0.12),
-                    border: Border.all(color: color.withOpacity(0.48)),
+              MetricTile(
+                icon: Icons.local_activity_outlined,
+                label: 'Event range',
+                value: state.tableRange,
+                accent: state.timerColor,
+              ),
+              MetricTile(
+                icon: Icons.bolt_outlined,
+                label: 'Round status',
+                value: state.stageLabel,
+                accent: state.statusColor,
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          AppCard(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = constraints.maxWidth > 1200
+                    ? 8
+                    : constraints.maxWidth > 900
+                        ? 6
+                        : constraints.maxWidth > 560
+                            ? 4
+                            : 2;
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: state.tableCount,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: columns,
+                    crossAxisSpacing: 14,
+                    mainAxisSpacing: 14,
+                    childAspectRatio: 1.10,
                   ),
-                  child: Center(
-                    child: Text(
-                      'Table $table',
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                  ),
+                  itemBuilder: (context, index) {
+                    final table = index + 1;
+                    final active = state.tableIsActive(table);
+                    final color =
+                        active ? state.timerColor : const Color(0xFF4ADE80);
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(24),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            color.withOpacity(active ? 0.22 : 0.16),
+                            color.withOpacity(active ? 0.08 : 0.05),
+                          ],
+                        ),
+                        border: Border.all(color: color.withOpacity(0.48)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: color.withOpacity(active ? 0.18 : 0.08),
+                            blurRadius: active ? 24 : 12,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            active
+                                ? Icons.flash_on_rounded
+                                : Icons.check_circle_outline,
+                            color: color,
+                          ),
+                          const Spacer(),
+                          Text(
+                            'Table $table',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            active ? 'In event rotation' : 'Available',
+                            style: softText.copyWith(
+                              color: active
+                                  ? color.withOpacity(0.90)
+                                  : const Color(0xFFB7FBCB),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 );
               },
-            );
-          },
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1860,7 +1996,9 @@ class _PresetsPageState extends State<PresetsPage> {
   Widget build(BuildContext context) {
     return PageScaffold(
       title: 'Event Presets',
-      subtitle: 'Create, edit, delete, and load common event setups.',
+      subtitle:
+          'Build reusable tournament recipes for weekly leagues, casual nights, and major store events.',
+      accent: const Color(0xFF8B5CF6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1868,19 +2006,14 @@ class _PresetsPageState extends State<PresetsPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  editingIndex == null ? 'Preset Editor' : 'Editing Preset',
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  editingIndex == null
-                      ? 'Create a new preset here, or save your current timer setup directly.'
-                      : 'Change the preset values and save them back into the selected preset.',
-                  style: softText,
+                SectionHeading(
+                  eyebrow: 'Preset workshop',
+                  title: editingIndex == null
+                      ? 'Create a new event preset'
+                      : 'Editing saved preset',
+                  subtitle: editingIndex == null
+                      ? 'Capture your best event structure once, then launch it in seconds.'
+                      : 'Update the selected preset and keep your tournament flow consistent.',
                 ),
                 const SizedBox(height: 16),
                 LayoutBuilder(
@@ -2015,22 +2148,11 @@ class _PresetsPageState extends State<PresetsPage> {
           const SizedBox(height: 18),
           if (widget.presets.isEmpty)
             const AppCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'No presets saved yet',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    'Use “Save as New Preset” or “Save Current Setup as Preset” to create your first preset.',
-                    style: softText,
-                  ),
-                ],
+              child: SectionHeading(
+                eyebrow: 'Empty vault',
+                title: 'No presets saved yet',
+                subtitle:
+                    'Use Save as New Preset or Save Current Setup as Preset to create your first tournament recipe.',
               ),
             )
           else
@@ -2045,6 +2167,18 @@ class _PresetsPageState extends State<PresetsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF22D3EE), Color(0xFF8B5CF6)],
+                            ),
+                          ),
+                          child: const Icon(Icons.auto_awesome),
+                        ),
+                        const SizedBox(height: 16),
                         Text(
                           preset.name,
                           style: const TextStyle(
@@ -2103,28 +2237,69 @@ class PageScaffold extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.child,
+    this.accent = const Color(0xFF38BDF8),
     super.key,
   });
 
   final String title;
   final String subtitle;
   final Widget child;
+  final Color accent;
 
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.all(26),
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
       children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w900),
+        Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            gradient: LinearGradient(
+              colors: [accent.withOpacity(0.18), const Color(0x22151B33)],
+            ),
+            border: Border.all(color: Colors.white.withOpacity(0.10)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 38,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1.2,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(subtitle, style: softText.copyWith(fontSize: 15)),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  InfoPill(
+                    icon: Icons.bolt,
+                    text: 'Venue-ready display',
+                    color: accent,
+                  ),
+                  const InfoPill(
+                    icon: Icons.auto_awesome,
+                    text: 'Modern animated UI',
+                    color: Color(0xFF8B5CF6),
+                  ),
+                  const InfoPill(
+                    icon: Icons.timer_outlined,
+                    text: appVersion,
+                    color: Color(0xFF22D3EE),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 6),
-        Text(subtitle, style: softText),
         const SizedBox(height: 22),
         child,
-        const SizedBox(height: 22),
-        Text(appVersion, style: softText.copyWith(fontSize: 12)),
       ],
     );
   }
@@ -2137,11 +2312,22 @@ class AppCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: Colors.white.withOpacity(0.075),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(26),
-        side: BorderSide(color: Colors.white.withOpacity(0.12)),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xD9111730), Color(0xCC0B1226)],
+        ),
+        border: Border.all(color: Colors.white.withOpacity(0.10)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 30,
+            offset: const Offset(0, 14),
+          ),
+        ],
       ),
       child: Padding(padding: const EdgeInsets.all(24), child: child),
     );
@@ -2160,7 +2346,9 @@ class StatusBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: color.withOpacity(0.18),
+        gradient: LinearGradient(
+          colors: [color.withOpacity(0.22), color.withOpacity(0.08)],
+        ),
         border: Border.all(color: color.withOpacity(0.45)),
       ),
       child: Text(
@@ -2203,8 +2391,17 @@ class BigInkLogo extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(size * 0.32),
         gradient: const LinearGradient(
-          colors: [Color(0xFF5FB3FF), Color(0xFF7C3AED)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF22D3EE), Color(0xFF8B5CF6)],
         ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8B5CF6).withOpacity(0.35),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Center(
         child: Text(
@@ -2217,6 +2414,999 @@ class BigInkLogo extends StatelessWidget {
       ),
     );
   }
+}
+
+class HeroTimerCard extends StatelessWidget {
+  const HeroTimerCard({
+    required this.state,
+    required this.onToggle,
+    required this.onAddFive,
+    required this.onReset,
+    required this.onNextRound,
+    required this.onFinishEvent,
+    super.key,
+  });
+
+  final TimerStateModel state;
+  final Future<void> Function() onToggle;
+  final Future<void> Function() onAddFive;
+  final Future<void> Function() onReset;
+  final Future<void> Function() onNextRound;
+  final Future<void> Function() onFinishEvent;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stacked = constraints.maxWidth < 900;
+          final ringSize = stacked ? 220.0 : 250.0;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  const InfoPill(
+                    icon: Icons.sports_esports_outlined,
+                    text: 'Tournament live',
+                    color: Color(0xFF22D3EE),
+                  ),
+                  InfoPill(
+                    icon: Icons.bolt_outlined,
+                    text: state.stageLabel,
+                    color: state.statusColor,
+                  ),
+                  InfoPill(
+                    icon: Icons.grid_view_rounded,
+                    text: 'Tables ${state.tableRange}',
+                    color: const Color(0xFFF97316),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              if (stacked)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _HeroTimerDetails(
+                      state: state,
+                      onToggle: onToggle,
+                      onAddFive: onAddFive,
+                      onReset: onReset,
+                      onNextRound: onNextRound,
+                      onFinishEvent: onFinishEvent,
+                    ),
+                    const SizedBox(height: 28),
+                    Center(
+                      child: _HeroTimerVisual(
+                        state: state,
+                        ringSize: ringSize,
+                        headlineSize: 64,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 6,
+                      child: _HeroTimerDetails(
+                        state: state,
+                        onToggle: onToggle,
+                        onAddFive: onAddFive,
+                        onReset: onReset,
+                        onNextRound: onNextRound,
+                        onFinishEvent: onFinishEvent,
+                      ),
+                    ),
+                    const SizedBox(width: 28),
+                    Expanded(
+                      flex: 4,
+                      child: _HeroTimerVisual(
+                        state: state,
+                        ringSize: ringSize,
+                        headlineSize: 78,
+                      ),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 24),
+              if (state.isFinalRound && !state.eventFinished)
+                const FinalRoundNotice(),
+              if (state.eventFinished) const EventFinishedNotice(),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class TimeControlDisplay extends StatelessWidget {
+  const TimeControlDisplay({
+    required this.state,
+    required this.size,
+    required this.headlineSize,
+    super.key,
+  });
+
+  final TimerStateModel state;
+  final double size;
+  final double headlineSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: state.remainingRatio),
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        return SizedBox(
+          width: size,
+          height: size,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: size * 0.88,
+                height: size * 0.88,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      state.timerColor.withOpacity(0.24),
+                      state.timerColor.withOpacity(0.04),
+                    ],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: state.timerColor.withOpacity(0.28),
+                      blurRadius: 34,
+                      spreadRadius: 6,
+                    ),
+                  ],
+                ),
+              ),
+              CustomPaint(
+                size: Size.square(size),
+                painter: RingPainter(
+                  progress: value,
+                  accent: state.timerColor,
+                ),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    state.eventFinished
+                        ? 'DONE'
+                        : state.remainingNow <= 0
+                            ? 'TIME'
+                            : formatSeconds(state.remainingNow),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: headlineSize,
+                      height: 0.9,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: state.remainingNow <= 0 ? -2 : -4,
+                      color: state.timerColor,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    state.eventFinished
+                        ? 'Event complete'
+                        : state.remainingNow <= 0
+                            ? 'Called'
+                            : 'Remaining',
+                    style: softText.copyWith(
+                      fontSize: size * 0.07,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _HeroTimerDetails extends StatelessWidget {
+  const _HeroTimerDetails({
+    required this.state,
+    required this.onToggle,
+    required this.onAddFive,
+    required this.onReset,
+    required this.onNextRound,
+    required this.onFinishEvent,
+  });
+
+  final TimerStateModel state;
+  final Future<void> Function() onToggle;
+  final Future<void> Function() onAddFive;
+  final Future<void> Function() onReset;
+  final Future<void> Function() onNextRound;
+  final Future<void> Function() onFinishEvent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          state.eventName,
+          style: const TextStyle(
+            fontSize: 34,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -1.2,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          '${state.game} · ${state.matchFormat} · Round ${state.currentRound}/${state.totalRounds}',
+          style: softText.copyWith(fontSize: 16),
+        ),
+        const SizedBox(height: 22),
+        Text(
+          state.playerHeadline,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: state.statusColor,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          state.playerMessage,
+          style: softText.copyWith(height: 1.5),
+        ),
+        const SizedBox(height: 24),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            FilledButton.icon(
+              onPressed: onToggle,
+              icon: Icon(
+                state.running
+                    ? Icons.pause_circle_filled
+                    : Icons.play_circle_fill,
+              ),
+              label: Text(
+                state.running ? 'Pause Round' : 'Start Round',
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: onAddFive,
+              icon: const Icon(Icons.add_circle_outline),
+              label: const Text('+5 Minutes'),
+            ),
+            OutlinedButton.icon(
+              onPressed: onReset,
+              icon: const Icon(Icons.replay_circle_filled_outlined),
+              label: const Text('Reset'),
+            ),
+            OutlinedButton.icon(
+              onPressed: onNextRound,
+              icon: const Icon(Icons.skip_next_rounded),
+              label: const Text('Next Round'),
+            ),
+            OutlinedButton.icon(
+              onPressed: onFinishEvent,
+              icon: const Icon(Icons.emoji_events_outlined),
+              label: const Text('Finish Event'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _HeroTimerVisual extends StatelessWidget {
+  const _HeroTimerVisual({
+    required this.state,
+    required this.ringSize,
+    required this.headlineSize,
+  });
+
+  final TimerStateModel state;
+  final double ringSize;
+  final double headlineSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        TimeControlDisplay(
+          state: state,
+          size: ringSize,
+          headlineSize: headlineSize,
+        ),
+        const SizedBox(height: 18),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            MiniMetric(
+              label: 'Round length',
+              value: '${state.roundLengthMinutes} min',
+            ),
+            MiniMetric(
+              label: 'Total tables',
+              value: '${state.tableCount}',
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class RingPainter extends CustomPainter {
+  RingPainter({required this.progress, required this.accent});
+
+  final double progress;
+  final Color accent;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = size.width * 0.06;
+    final center = size.center(Offset.zero);
+    final radius = (size.width - stroke) / 2;
+
+    final base = Paint()
+      ..color = Colors.white.withOpacity(0.08)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+
+    final progressPaint = Paint()
+      ..shader = SweepGradient(
+        colors: [accent.withOpacity(0.20), accent, const Color(0xFFFFFFFF)],
+        stops: const [0.0, 0.7, 1.0],
+        startAngle: -math.pi / 2,
+        endAngle: 1.5 * math.pi,
+      ).createShader(Rect.fromCircle(center: center, radius: radius))
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawCircle(center, radius, base);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -math.pi / 2,
+      2 * math.pi * progress,
+      false,
+      progressPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant RingPainter oldDelegate) {
+    return oldDelegate.progress != progress || oldDelegate.accent != accent;
+  }
+}
+
+class StatusNotice extends StatelessWidget {
+  const StatusNotice({
+    required this.icon,
+    required this.title,
+    required this.message,
+    required this.accent,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          colors: [accent.withOpacity(0.20), accent.withOpacity(0.06)],
+        ),
+        border: Border.all(color: accent.withOpacity(0.45)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: accent.withOpacity(0.16),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: accent),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(message, style: softText.copyWith(height: 1.45)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class TournamentNavigation extends StatelessWidget {
+  const TournamentNavigation({
+    required this.selectedIndex,
+    required this.state,
+    required this.onSelected,
+    this.compact = false,
+    super.key,
+  });
+
+  final int selectedIndex;
+  final TimerStateModel state;
+  final ValueChanged<int> onSelected;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      (icon: Icons.timer_outlined, label: 'Timer'),
+      (icon: Icons.tv_outlined, label: 'Player Screen'),
+      (icon: Icons.grid_view_outlined, label: 'Tables'),
+      (icon: Icons.event_note_outlined, label: 'Presets'),
+    ];
+
+    final rail = compact
+        ? SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 12),
+            child: Row(
+              children: List.generate(items.length, (index) {
+                final item = items[index];
+                return Padding(
+                  padding: EdgeInsets.only(
+                      right: index == items.length - 1 ? 0 : 12),
+                  child: NavigationChip(
+                    icon: item.icon,
+                    label: item.label,
+                    selected: selectedIndex == index,
+                    onTap: () => onSelected(index),
+                  ),
+                );
+              }),
+            ),
+          )
+        : SizedBox(
+            width: 290,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 8, 20),
+              child: AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        BigInkLogo(size: 54),
+                        SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Big Ink Timer',
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              Text(
+                                'Tournament command center',
+                                style: softText,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(22),
+                        gradient: LinearGradient(
+                          colors: [
+                            state.timerColor.withOpacity(0.20),
+                            state.timerColor.withOpacity(0.06),
+                          ],
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          StatusBadge(
+                            text: state.status,
+                            color: state.statusColor,
+                          ),
+                          const SizedBox(height: 14),
+                          Text(
+                            formatSeconds(state.remainingNow),
+                            style: TextStyle(
+                              fontSize: 34,
+                              fontWeight: FontWeight.w900,
+                              color: state.timerColor,
+                              letterSpacing: -1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${state.game} · Round ${state.currentRound}/${state.totalRounds}',
+                            style: softText.copyWith(fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    Column(
+                      children: List.generate(items.length, (index) {
+                        final item = items[index];
+                        return Padding(
+                          padding: EdgeInsets.only(
+                            bottom: index == items.length - 1 ? 0 : 10,
+                          ),
+                          child: NavigationChip(
+                            icon: item.icon,
+                            label: item.label,
+                            selected: selectedIndex == index,
+                            onTap: () => onSelected(index),
+                            fullWidth: true,
+                          ),
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      appVersion,
+                      style: softText.copyWith(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+
+    return rail;
+  }
+}
+
+class NavigationChip extends StatelessWidget {
+  const NavigationChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.fullWidth = false,
+    super.key,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool fullWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = selected ? const Color(0xFF22D3EE) : Colors.white;
+    final background =
+        selected ? const Color(0x3322D3EE) : Colors.white.withOpacity(0.04);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Ink(
+          width: fullWidth ? double.infinity : null,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            color: background,
+            border: Border.all(
+              color: selected
+                  ? const Color(0x6622D3EE)
+                  : Colors.white.withOpacity(0.06),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: fullWidth ? MainAxisSize.max : MainAxisSize.min,
+            children: [
+              Icon(icon, color: accent),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: accent,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SectionHeading extends StatelessWidget {
+  const SectionHeading({
+    required this.eyebrow,
+    required this.title,
+    required this.subtitle,
+    super.key,
+  });
+
+  final String eyebrow;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          eyebrow.toUpperCase(),
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.8,
+            color: Color(0xFF7DD3FC),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          title,
+          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 8),
+        Text(subtitle, style: softText.copyWith(height: 1.5)),
+      ],
+    );
+  }
+}
+
+class MetricTile extends StatelessWidget {
+  const MetricTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.accent,
+    super.key,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 170),
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          gradient: LinearGradient(
+            colors: [accent.withOpacity(0.20), accent.withOpacity(0.05)],
+          ),
+          border: Border.all(color: accent.withOpacity(0.32)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: accent),
+            const SizedBox(height: 16),
+            Text(label, style: softText.copyWith(fontSize: 13)),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class MiniMetric extends StatelessWidget {
+  const MiniMetric({required this.label, required this.value, super.key});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: Colors.white.withOpacity(0.05),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Column(
+        children: [
+          Text(label, style: softText.copyWith(fontSize: 12)),
+          const SizedBox(height: 4),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
+        ],
+      ),
+    );
+  }
+}
+
+class InfoPill extends StatelessWidget {
+  const InfoPill({
+    required this.icon,
+    required this.text,
+    required this.color,
+    super.key,
+  });
+
+  final IconData icon;
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: color.withOpacity(0.14),
+        border: Border.all(color: color.withOpacity(0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: TextStyle(color: color, fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ScreenStatPill extends StatelessWidget {
+  const ScreenStatPill({
+    required this.icon,
+    required this.label,
+    super.key,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: Colors.white.withOpacity(0.08),
+        border: Border.all(color: Colors.white.withOpacity(0.12)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: const Color(0xFF7DD3FC)),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AnimatedBackdrop extends StatefulWidget {
+  const AnimatedBackdrop({
+    required this.accent,
+    super.key,
+  });
+
+  final Color accent;
+
+  @override
+  State<AnimatedBackdrop> createState() => _AnimatedBackdropState();
+}
+
+class _AnimatedBackdropState extends State<AnimatedBackdrop>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController controller;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 12),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, child) {
+        final shift = controller.value;
+        return Stack(
+          children: [
+            Positioned(
+              top: -120 + 80 * shift,
+              left: -60 + 120 * shift,
+              child: BackdropOrb(
+                size: 320,
+                color: widget.accent.withOpacity(0.24),
+              ),
+            ),
+            Positioned(
+              right: -110 + 60 * shift,
+              top: 120 - 70 * shift,
+              child: BackdropOrb(
+                size: 280,
+                color: const Color(0xFF8B5CF6).withOpacity(0.20),
+              ),
+            ),
+            Positioned(
+              bottom: -120 + 60 * shift,
+              left: MediaQuery.of(context).size.width * 0.35,
+              child: BackdropOrb(
+                size: 360,
+                color: const Color(0xFF22D3EE).withOpacity(0.10),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class BackdropOrb extends StatelessWidget {
+  const BackdropOrb({required this.size, required this.color, super.key});
+
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [color, color.withOpacity(0.0)],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+ThemeData buildAppTheme() {
+  const accent = Color(0xFF22D3EE);
+  final scheme = ColorScheme.fromSeed(
+    seedColor: accent,
+    brightness: Brightness.dark,
+  ).copyWith(
+    primary: accent,
+    secondary: const Color(0xFF8B5CF6),
+    surface: const Color(0xFF10162B),
+  );
+
+  return ThemeData(
+    useMaterial3: true,
+    brightness: Brightness.dark,
+    colorScheme: scheme,
+    scaffoldBackgroundColor: const Color(0xFF070A14),
+    fontFamily: 'Arial',
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.05),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: Colors.white.withOpacity(0.10)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: Colors.white.withOpacity(0.10)),
+      ),
+      focusedBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(18)),
+        borderSide: BorderSide(color: accent, width: 1.2),
+      ),
+      labelStyle: const TextStyle(color: Color(0xFFB7C2D9)),
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: Colors.white.withOpacity(0.08),
+      side: BorderSide(color: Colors.white.withOpacity(0.10)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+      labelStyle: const TextStyle(
+        color: Colors.white,
+        fontWeight: FontWeight.w800,
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: accent,
+        foregroundColor: const Color(0xFF03121A),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        side: BorderSide(color: Colors.white.withOpacity(0.14)),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800),
+      ),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: const Color(0xFF11182E),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+    ),
+  );
 }
 
 class TimerStateModel {
@@ -2302,6 +3492,14 @@ class TimerStateModel {
 
   bool get isFinalRound => currentRound >= totalRounds;
 
+  int get totalRoundSeconds => roundLengthMinutes * 60;
+
+  double get remainingRatio {
+    final total = totalRoundSeconds;
+    if (eventFinished || total <= 0) return 0;
+    return (remainingNow / total).clamp(0.0, 1.0).toDouble();
+  }
+
   int get remainingNow {
     if (eventFinished) return 0;
     if (!running) return remainingSeconds < 0 ? 0 : remainingSeconds;
@@ -2316,6 +3514,38 @@ class TimerStateModel {
     if (eventFinished) return 'FINISHED';
     if (remainingNow <= 0) return 'TIME CALLED';
     return running ? 'RUNNING' : 'PAUSED';
+  }
+
+  String get stageLabel {
+    if (eventFinished) return 'Winners';
+    if (remainingNow <= 0) return 'Time called';
+    if (isFinalRound) return 'Final round';
+    if (remainingNow <= 300) return 'Final five';
+    return running ? 'Round live' : 'Ready';
+  }
+
+  String get playerHeadline {
+    if (eventFinished) return 'Event complete';
+    if (remainingNow <= 0) return 'Please finish your current turn';
+    if (isFinalRound) return 'Final round in progress';
+    if (remainingNow <= 300) return 'Final five minutes';
+    return running ? 'Round in progress' : 'Round paused';
+  }
+
+  String get playerMessage {
+    if (eventFinished) {
+      return 'The event is finished and the podium presentation is live.';
+    }
+    if (remainingNow <= 0) {
+      return 'Time has been called. Finish the current turn according to event rules, then report your result.';
+    }
+    if (isFinalRound) {
+      return 'Final round — good luck, have fun, and report your final result after the round.';
+    }
+    if (!running) {
+      return 'The tournament clock is paused. Prepare players for the next action.';
+    }
+    return 'Good luck, have fun — please report your result after the round.';
   }
 
   Color get timerColor {
