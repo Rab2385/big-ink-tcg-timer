@@ -1,0 +1,582 @@
+<title>Big Ink Timer Redesign</title>
+<meta name="description" content="Code-Review, Verbesserungsvorschläge und interaktive Mockups für den Big Ink TCG Timer inkl. Second-Screen-Modus.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Barlow+Condensed:wght@600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: long-form review column; mockups break out into wide "device" frames (control panel = laptop, player = 16:9 TV). Single dark look, matching the app and its TV use. */
+:root {
+  --bg: #050C18;
+  --surface: #0B1729;
+  --surface-2: #11223A;
+  --line: rgba(190, 215, 255, 0.13);
+  --fg: #EAF2FF;
+  --muted: #9AAECA;
+  --accent: #5FB3FF;
+  --violet: #7C3AED;
+  --ok: #4ADE80;
+  --warn: #FACC15;
+  --late: #FB923C;
+  --crit: #FB7185;
+  --font-display: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+  --font-body: "Barlow", "Segoe UI", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background: var(--bg); }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.55 var(--font-body);
+  padding-inline: 16px;
+  padding-block: 0 64px;
+}
+.wrap { max-width: 1180px; margin-inline: auto; }
+.prose { max-width: 720px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.05; margin: 0; }
+h1 { font-size: clamp(2.6rem, 6vw, 4.4rem); font-weight: 900; letter-spacing: -0.01em; }
+h2 { font-size: clamp(1.9rem, 3.6vw, 2.6rem); font-weight: 800; }
+h3 { font-size: 1.35rem; font-weight: 700; }
+p { margin: 0; }
+a { color: var(--accent); }
+code { font-family: var(--font-mono); font-size: 0.86em; background: var(--surface-2); padding: 0.1em 0.35em; border-radius: 5px; }
+.eyebrow { font: 700 0.78rem/1 var(--font-body); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+.muted { color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Hero */
+.hero { padding-block: 56px 40px; display: grid; gap: 18px; border-bottom: 1px solid var(--line); }
+.hero .lede { font-size: 1.15rem; color: var(--muted); max-width: 760px; }
+.hero .lede strong { color: var(--fg); }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 10px; }
+.summary div { border-top: 3px solid var(--c, var(--accent)); padding-top: 10px; min-width: 0; }
+.summary b { display: block; font: 800 1.15rem/1.2 var(--font-display); letter-spacing: 0.02em; }
+.summary span { color: var(--muted); font-size: 0.95rem; }
+
+section { padding-block: 56px 8px; display: grid; gap: 22px; }
+.sec-head { display: grid; gap: 10px; }
+
+/* Findings */
+.findings { display: grid; gap: 10px; }
+.finding { display: grid; grid-template-columns: 96px 1fr; gap: 16px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.finding > div { min-width: 0; }
+.finding h3 { font: 700 1.02rem/1.3 var(--font-body); margin-bottom: 4px; }
+.finding p { color: var(--muted); font-size: 0.95rem; }
+.finding .loc { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); opacity: 0.85; margin-top: 6px; overflow-wrap: anywhere; }
+.sev { align-self: start; font: 800 0.72rem/1 var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; padding: 6px 8px; border-radius: 6px; text-align: center; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); }
+.sev.hi { --c: var(--crit); } .sev.md { --c: var(--late); } .sev.lo { --c: var(--warn); } .sev.ux { --c: var(--accent); }
+@media (max-width: 560px) { .finding { grid-template-columns: 1fr; gap: 8px; } .sev { justify-self: start; } }
+
+/* Principles */
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.principles div { padding: 16px; border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.principles b { display: block; margin-bottom: 4px; }
+.principles span { color: var(--muted); font-size: 0.95rem; }
+
+/* Device frames */
+.device { border: 1px solid var(--line); border-radius: 18px; background: #030812; padding: 10px; box-shadow: 0 30px 60px -30px rgba(0,0,0,0.8); }
+.device-label { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; font: 600 0.8rem/1 var(--font-body); color: var(--muted); padding: 2px 6px 10px; letter-spacing: 0.04em; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 6px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+
+/* ===== Control panel mock ===== */
+.cp { display: grid; grid-template-columns: 64px 1fr; min-height: 560px; background: #071120; border-radius: 10px; overflow: hidden; }
+.rail { background: rgba(0,0,0,0.3); display: flex; flex-direction: column; align-items: center; gap: 6px; padding-block: 14px; border-right: 1px solid var(--line); }
+.rail .logo { width: 38px; height: 38px; border-radius: 12px; background: linear-gradient(135deg, var(--accent), var(--violet)); display: grid; place-items: center; font: 900 0.85rem var(--font-display); margin-bottom: 10px; }
+.rail button { width: 48px; padding: 8px 0 6px; border: 0; border-radius: 10px; background: none; color: var(--muted); font: 600 0.62rem/1 var(--font-body); display: grid; justify-items: center; gap: 4px; cursor: pointer; }
+.rail button svg { width: 20px; height: 20px; }
+.rail button.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--fg); }
+.cp-main { padding: 18px; display: grid; gap: 14px; align-content: start; min-width: 0; }
+.cp-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cp-top .title { min-width: 0; flex: 1 1 260px; }
+.cp-top .title b { font: 800 1.5rem/1.1 var(--font-display); display: block; }
+.cp-top .title span { color: var(--muted); font-size: 0.85rem; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 999px; font: 700 0.75rem/1 var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 15%, transparent); border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 45%, transparent); white-space: nowrap; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--fg); font: 700 0.92rem/1 var(--font-body); cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.btn.primary { background: var(--accent); color: #04101F; border-color: transparent; }
+.btn.danger { color: var(--crit); }
+.btn.gold { background: var(--warn); color: #1A1300; border-color: transparent; }
+.btn kbd { font: 600 0.68rem/1 var(--font-mono); padding: 3px 5px; border-radius: 4px; background: rgba(0,0,0,0.25); opacity: 0.8; }
+.btn.primary kbd, .btn.gold kbd { background: rgba(0,0,0,0.15); }
+.cp-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 900px) { .cp-grid { grid-template-columns: 1fr; } }
+.panel { background: rgba(255,255,255,0.05); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; display: grid; gap: 12px; align-content: start; }
+.panel h4 { margin: 0; font: 700 0.72rem/1 var(--font-body); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.stepper { display: flex; gap: 6px; }
+.stepper i { flex: 1; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.1); }
+.stepper i.done { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.stepper i.now { background: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+.stepper-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.8rem; }
+.big-time { font: 900 clamp(4.2rem, 11vw, 8.2rem)/0.9 var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; text-align: center; color: var(--tc, var(--accent)); transition: color 0.4s; }
+.big-sub { text-align: center; color: var(--muted); font-weight: 600; }
+.progress { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--tc, var(--accent)); transition: width 0.3s linear, background 0.4s; }
+.actions { display: grid; grid-template-columns: 1.6fr repeat(3, 1fr); gap: 8px; }
+.actions .btn { padding-block: 13px; }
+.actions .btn.primary { font-size: 1.05rem; }
+.actions2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 520px) { .actions { grid-template-columns: 1fr 1fr; } .actions .btn.primary { grid-column: 1 / -1; } .actions2 { grid-template-columns: 1fr; } }
+.preview { aspect-ratio: 16 / 9; max-width: 100%; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.screen-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 0.88rem; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.seg button { border: 0; background: none; color: var(--muted); padding: 7px 10px; font: 600 0.8rem var(--font-body); cursor: pointer; }
+.seg button.on { background: var(--surface-2); color: var(--fg); }
+.msg { display: flex; gap: 8px; }
+.msg input { flex: 1; min-width: 0; background: rgba(0,0,0,0.25); border: 1px solid var(--line); border-radius: 9px; color: var(--fg); padding: 9px 10px; font: 500 0.9rem var(--font-body); }
+.toast { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); background: var(--surface-2); border: 1px solid var(--line); padding: 10px 14px; border-radius: 10px; font-size: 0.88rem; display: flex; gap: 12px; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); white-space: nowrap; }
+.toast button { background: none; border: 0; color: var(--accent); font: 700 0.88rem var(--font-body); cursor: pointer; }
+.cp-wrap { position: relative; }
+.keys { color: var(--muted); font-size: 0.8rem; display: flex; gap: 14px; flex-wrap: wrap; }
+.keys kbd { font: 600 0.7rem var(--font-mono); padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; margin-right: 4px; }
+
+/* ===== Player screen (scales with container width via cqw) ===== */
+.ps-host { container-type: inline-size; aspect-ratio: 16 / 9; max-width: 100%; width: 100%; }
+.ps { width: 100%; height: 100%; position: relative; overflow: hidden; color: #fff; font-family: var(--font-body);
+  background: radial-gradient(120% 120% at 0% 0%, color-mix(in srgb, var(--tc) 30%, #06101F) 0%, #06101F 60%); transition: background 0.6s;
+  display: grid; grid-template-rows: auto 1fr auto; padding: 3cqw 4cqw; gap: 1cqw; }
+.ps-head { display: flex; align-items: center; gap: 1.6cqw; }
+.ps-logo { width: 5.2cqw; height: 5.2cqw; border-radius: 1.6cqw; background: linear-gradient(135deg, var(--accent), var(--violet)); display: grid; place-items: center; font: 900 1.8cqw var(--font-display); flex: none; }
+.ps-head .t { flex: 1; min-width: 0; }
+.ps-head .t b { display: block; font: 800 2.3cqw/1.05 var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ps-head .t span { font-size: 1.3cqw; opacity: 0.7; }
+.ps-round { text-align: right; font: 800 1.5cqw/1.1 var(--font-display); letter-spacing: 0.08em; }
+.ps-round small { display: block; font: 600 1.05cqw var(--font-body); letter-spacing: 0.1em; opacity: 0.7; }
+.ps-center { display: grid; place-items: center; align-content: center; gap: 0.6cqw; text-align: center; min-height: 0; }
+.ps-time { font: 900 23cqw/0.82 var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--tc); transition: color 0.5s; }
+.ps-time.called { font-size: 15cqw; }
+.ps-state { font: 700 2.4cqw/1.1 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; }
+.ps-over { font: 600 1.6cqw var(--font-body); opacity: 0.8; font-variant-numeric: tabular-nums; }
+.ps-bar { height: 0.7cqw; border-radius: 1cqw; background: rgba(255,255,255,0.1); overflow: hidden; }
+.ps-bar i { display: block; height: 100%; background: var(--tc); transition: width 0.3s linear, background 0.5s; }
+.ps-foot { display: grid; gap: 1.2cqw; }
+.ps-msg { font: 700 1.7cqw/1.25 var(--font-body); text-align: center; padding: 1.1cqw 2cqw; border-radius: 1.4cqw; background: rgba(0,0,0,0.25); }
+.ps-msg.custom { background: color-mix(in srgb, var(--warn) 22%, rgba(0,0,0,0.3)); border: 0.15cqw solid color-mix(in srgb, var(--warn) 60%, transparent); }
+.ps.flash .ps-time { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.55; } }
+.ps.paused .ps-time { opacity: 0.55; }
+/* Winners */
+.ps-win { display: grid; place-items: center; align-content: center; gap: 1.6cqw; }
+.ps-win h5 { margin: 0; font: 900 5.4cqw/1 var(--font-display); letter-spacing: 0.02em; }
+.podium { display: grid; grid-template-columns: 1fr 1.15fr 1fr; align-items: end; gap: 1.6cqw; width: 78cqw; }
+.podium div { border-radius: 1.6cqw 1.6cqw 0 0; padding: 1.4cqw; text-align: center; background: color-mix(in srgb, var(--pc) 16%, transparent); border: 0.15cqw solid color-mix(in srgb, var(--pc) 55%, transparent); border-bottom: 0; }
+.podium b { display: block; font: 800 2.6cqw/1.1 var(--font-display); overflow-wrap: anywhere; }
+.podium span { font: 800 1.3cqw var(--font-body); color: var(--pc); letter-spacing: 0.08em; text-transform: uppercase; }
+.podium .p1 { --pc: var(--warn); height: 17cqw; } .podium .p2 { --pc: #C0C7D2; height: 12.5cqw; } .podium .p3 { --pc: var(--late); height: 10cqw; }
+@media (prefers-reduced-motion: reduce) { .ps.flash .ps-time { animation: none; } * { transition: none !important; } }
+
+.demo-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.demo-bar span { color: var(--muted); font-size: 0.85rem; margin-right: 4px; }
+.demo-bar .btn { padding: 7px 10px; font-size: 0.82rem; }
+
+/* Static mocks */
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+.mock { background: #071120; border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: grid; gap: 14px; align-content: start; min-width: 0; }
+.mock .cap { color: var(--muted); font-size: 0.88rem; }
+.steps { display: flex; gap: 6px; flex-wrap: wrap; }
+.steps span { font: 700 0.75rem/1 var(--font-body); padding: 7px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.steps span.on { color: #04101F; background: var(--accent); border-color: transparent; }
+.preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.preset { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px; cursor: pointer; background: rgba(255,255,255,0.03); text-align: left; color: var(--fg); font: inherit; }
+.preset.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.preset b { font-size: 0.95rem; } .preset span { color: var(--muted); font-size: 0.8rem; }
+.field { display: grid; gap: 5px; }
+.field label { font: 600 0.78rem var(--font-body); color: var(--muted); }
+.field .in { background: rgba(0,0,0,0.25); border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; font-size: 0.92rem; display: flex; justify-content: space-between; gap: 8px; }
+.field .hint { font-size: 0.78rem; color: var(--ok); }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips span { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); font: 600 0.82rem var(--font-body); }
+.chips span.on { border-color: var(--accent); color: var(--accent); }
+.mini-tables { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; }
+.mini-tables i { aspect-ratio: 1; border-radius: 3px; background: rgba(255,255,255,0.08); }
+.mini-tables i.a { background: color-mix(in srgb, var(--accent) 65%, transparent); }
+.saved { font-size: 0.8rem; color: var(--ok); }
+.dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 18px; display: grid; gap: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+.place { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; }
+.place i { font: 800 0.95rem var(--font-display); width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-style: normal; color: #1A1300; background: var(--pc); }
+
+/* Architecture */
+.arch { display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; align-items: center; }
+.arch .box { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--surface); min-width: 0; display: grid; gap: 6px; }
+.arch .box b { font: 800 1.1rem var(--font-display); }
+.arch .box span { color: var(--muted); font-size: 0.88rem; }
+.arch .mid { display: grid; justify-items: center; gap: 4px; color: var(--accent); font: 600 0.78rem var(--font-mono); text-align: center; }
+.arch .mid svg { width: 90px; height: 22px; }
+.arch .full { grid-column: 1 / -1; }
+@media (max-width: 700px) { .arch { grid-template-columns: 1fr; } .arch .mid svg { transform: rotate(90deg); } }
+pre { margin: 0; background: #030812; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; overflow-x: auto; font: 0.8rem/1.6 var(--font-mono); color: #CFE0F7; }
+pre .c { color: #6F86A6; }
+pre .k { color: var(--accent); }
+
+/* Roadmap */
+.phases { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.phase { border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.phase .eyebrow { color: var(--c, var(--accent)); }
+.phase ul { margin: 0; padding-left: 1.1em; color: var(--muted); font-size: 0.93rem; display: grid; gap: 4px; }
+.phase li b { color: var(--fg); font-weight: 600; }
+.foot { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; }
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">Big Ink TCG Timer · V1.2.3 Alena · Review &amp; Redesign</div>
+  <h1>Ein Bildschirm zum Steuern, einer für die Spieler.</h1>
+  <p class="lede">Ich habe <code>lib/main.dart</code> (2.500 Zeilen) und <code>main.js</code> durchgesehen. Die App funktioniert und sieht schon gut aus. Die größten Hebel sind: <strong>Spieleranzeige auf einen zweiten Bildschirm</strong> auslagern, das <strong>Timer-Panel auf den Live-Betrieb reduzieren</strong> und ein paar <strong>Bugs bei Sync, Speichern und Löschen</strong> beheben.</p>
+  <div class="summary">
+    <div style="--c: var(--accent)"><b>Second Screen</b><span>Die Basis existiert schon (<code>#player</code>-Modus). Electron öffnet aber nur ein Fenster.</span></div>
+    <div style="--c: var(--ok)"><b>Weniger Klicks</b><span>Autosave statt „Apply“-Buttons, Event-Setup als Assistent, Tastenkürzel.</span></div>
+    <div style="--c: var(--crit)"><b>3 echte Bugs</b><span>Ungespeicherte Eingaben gehen verloren, Preset-Löschen ohne Rückfrage, Electron hängt bei belegtem Port.</span></div>
+  </div>
+</header>
+
+<section id="review">
+  <div class="sec-head prose">
+    <div class="eyebrow">1 · Code-Review</div>
+    <h2>Was mir im Code aufgefallen ist</h2>
+    <p class="muted">Sortiert nach Auswirkung im Turnierbetrieb. Zeilennummern beziehen sich auf <code>lib/main.dart</code>, außer anders angegeben.</p>
+  </div>
+  <div class="findings">
+    <div class="finding"><span class="sev hi">Bug</span><div><h3>Ungespeicherte Eingaben werden bei „Next Round“ überschrieben</h3><p>Textfelder werden erst mit „Apply“ übernommen. <code>nextRound()</code> und <code>loadPreset()</code> rufen <code>_syncTextFields()</code> auf. Wer z.&nbsp;B. schon Siegernamen oder einen neuen Eventnamen getippt hat und dann „Next Round“ drückt, verliert die Eingabe ohne Hinweis. Dropdowns und der Logo-Schalter speichern dagegen sofort. Das ist inkonsistent.</p><div class="loc">main.dart:377 · 423 · applySettings() ab 233</div></div></div>
+    <div class="finding"><span class="sev hi">Bug</span><div><h3>Presets werden ohne Rückfrage gelöscht</h3><p>Die Presets-Seite nutzt <code>deletePresetDirect</code>. Die Variante mit Bestätigungsdialog (<code>deletePreset</code>) existiert, wird aber nie aufgerufen. Außerdem: Wird während des Bearbeitens ein anderes Preset gelöscht, verschieben sich die Indizes und „Save Edited Preset“ überschreibt das falsche Preset.</p><div class="loc">main.dart:613 · 638 · 772 · 1853</div></div></div>
+    <div class="finding"><span class="sev hi">Bug</span><div><h3>Electron startet nicht, wenn Port 18581 belegt ist</h3><p><code>server.listen()</code> hat keinen Error-Handler. Läuft die App schon (Doppelklick) oder belegt ein anderes Programm den Port, wird das Promise nie erfüllt: kein Fenster, keine Meldung. Es fehlt auch <code>app.requestSingleInstanceLock()</code>.</p><div class="loc">main.js:66</div></div></div>
+    <div class="finding"><span class="sev md">Sync</span><div><h3>Zwei Fenster schreiben gleichzeitig denselben Zustand</h3><p>Im <code>#player</code>-Modus lädt das Fenster jede Sekunde aus <code>SharedPreferences</code>. Bei 00:00 speichert es aber auch selbst (<code>_setStateModel</code> im Ticker). Drückt die Turnierleitung genau dann „+5 Min“, kann das Spielerfenster die Änderung überschreiben. Die Anzeige läuft außerdem bis zu 1&nbsp;s hinterher. Besser: nur das Control Panel schreibt, die Anzeige liest per <code>BroadcastChannel</code> bzw. Electron-IPC.</p><div class="loc">main.dart:57–68 · 161</div></div></div>
+    <div class="finding"><span class="sev md">Timer</span><div><h3>Sekunden können springen oder hängen</h3><p><code>Timer.periodic(1s)</code> ist nicht an die Sekundengrenze gekoppelt, und <code>remainingNow</code> rundet mit <code>floor()</code>. Dadurch springt die Anzeige gelegentlich 10:00 → 09:58. Mit einem 200–250&nbsp;ms-Tick, einer festen <code>endsAt</code>-Zeit statt <code>remainingSeconds + lastUpdate</code> und <code>ceil()</code> läuft es sauber.</p><div class="loc">main.dart:57 · TimerStateModel.remainingNow</div></div></div>
+    <div class="finding"><span class="sev md">Crash</span><div><h3>Spiel-Dropdown kann abstürzen</h3><p>Das Dropdown im Timer-Panel hat eine fest kodierte Liste statt <code>gameOptions</code>. Steht in den gespeicherten Daten ein Spiel, das nicht in der Liste ist, wirft Flutter einen Assertion-Fehler. Der Preset-Editor fängt das ab, das Timer-Panel nicht.</p><div class="loc">main.dart:948</div></div></div>
+    <div class="finding"><span class="sev lo">Pflege</span><div><h3>Toter Code und veraltete APIs</h3><p><code>showPresetEditorDialog</code>, <code>editPreset</code>, <code>deletePreset</code> und <code>restoreDefaultPresets</code> werden nicht benutzt. „Add Default Presets“ hängt bei jedem Klick Duplikate an. <code>dart:html</code> ist veraltet (Ersatz: <code>package:web</code>), <code>withOpacity</code> ist deprecated (Ersatz: <code>withValues(alpha:)</code>). <code>"electron": "latest"</code> macht Builds unreproduzierbar.</p><div class="loc">main.dart:3 · 427 · 619 · 638 · package.json:32</div></div></div>
+    <div class="finding"><span class="sev lo">Pflege</span><div><h3>Alles in einer Datei, keine Tests</h3><p>Model, Speicherung, fünf Seiten und alle Widgets stehen in <code>main.dart</code>. Vorschlag: <code>models/</code>, <code>services/</code>, <code>screens/</code>, <code>widgets/</code>. Dann lassen sich <code>TimerStateModel</code> und <code>tableIsActive</code> einfach testen. Versionen stimmen nicht überein (README V1.2.2, Code V1.2.3, pubspec 1.0.0, Beschreibung „A new Flutter project.“).</p><div class="loc">lib/main.dart · pubspec.yaml · README.md</div></div></div>
+    <div class="finding"><span class="sev ux">UX</span><div><h3>Steuern und Anzeigen schließen sich aus</h3><p>„Player Screen“ schaltet dasselbe Fenster in den Vollbildmodus. Solange die Spieler den Timer sehen, kann die Turnierleitung nichts bedienen. Zurück geht es nur per Esc. Zudem gibt es keinen Ton bei Zeitablauf, kein −1 Min, keine Möglichkeit, die Zeit direkt zu setzen, und keine Nachricht an die Spieler („Pairings hängen aus“).</p><div class="loc">openPlayerScreenFullscreen() · AdminTimerPage</div></div></div>
+  </div>
+</section>
+
+<section id="principles">
+  <div class="sec-head prose">
+    <div class="eyebrow">2 · Bedienkonzept</div>
+    <h2>Fünf Regeln für das neue UI</h2>
+  </div>
+  <div class="principles">
+    <div><b>Live zuerst</b><span>Die Startseite zeigt nur, was während einer Runde gebraucht wird: Zeit, Runde, die nächste Aktion. Setup wandert in einen eigenen Bereich.</span></div>
+    <div><b>Eine Hauptaktion</b><span>Der große Button passt sich an: Start → Pause → Nächste Runde → Event beenden. Man muss nicht überlegen, was als Nächstes kommt.</span></div>
+    <div><b>Kein „Apply“</b><span>Jede Änderung wird sofort gespeichert („Gespeichert ✓“). Was den laufenden Timer betrifft, fragt nach.</span></div>
+    <div><b>Rückgängig statt Dialog</b><span>Löschen, Runde wechseln, Zeit ändern: sofort ausführen, 8&nbsp;Sekunden „Rückgängig“ anbieten.</span></div>
+    <div><b>Tastatur</b><span>Leertaste Start/Pause, ← / → ±1 Min, N nächste Runde, M Nachricht, B Bildschirm schwarz.</span></div>
+  </div>
+</section>
+
+<section id="mockup-live">
+  <div class="sec-head prose">
+    <div class="eyebrow">3 · Mockup · Bildschirm 1</div>
+    <h2>Control Panel (Laptop)</h2>
+    <p class="muted">Interaktiv: Buttons und Tasten funktionieren. Die Vorschau rechts zeigt genau das, was auf Bildschirm 2 läuft (unten in Abschnitt 4 groß).</p>
+  </div>
+
+  <div class="device cp-wrap">
+    <div class="device-label"><span>Bildschirm 1 · Laptop der Turnierleitung</span><span class="keys"><span><kbd>Space</kbd>Start/Pause</span><span><kbd>←</kbd><kbd>→</kbd>±1 Min</span><span><kbd>N</kbd>Nächste Runde</span><span><kbd>B</kbd>Schwarz</span></span></div>
+    <div class="cp">
+      <nav class="rail" aria-label="Navigation (Mockup)">
+        <div class="logo">BI</div>
+        <button class="on" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg>Live</button>
+        <button type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Setup</button>
+        <button type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>Presets</button>
+        <button type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Tische</button>
+      </nav>
+      <div class="cp-main">
+        <div class="cp-top">
+          <div class="title"><b id="cp-event">Lorcana Weekly League</b><span>Disney Lorcana · BO1 · 50 Min · Tische 1–12</span></div>
+          <span class="pill" id="cp-status" style="--c: var(--warn)">Pausiert</span>
+          <span class="pill" style="--c: var(--ok)"><span class="dot"></span>Bildschirm 2 live</span>
+        </div>
+
+        <div class="cp-grid">
+          <div class="panel">
+            <div>
+              <h4><span id="cp-round-label">Runde 3 von 4</span><span id="cp-final" class="pill" style="--c: var(--warn)" hidden>Finale Runde</span></h4>
+              <div class="stepper" id="cp-stepper" style="margin-top:10px"></div>
+            </div>
+            <div class="big-time" id="cp-time">50:00</div>
+            <div class="progress"><i id="cp-progress" style="width:100%"></i></div>
+            <div class="big-sub" id="cp-sub">Endet um –</div>
+            <div class="actions">
+              <button class="btn primary" id="act-main" type="button">▶ Start <kbd>Space</kbd></button>
+              <button class="btn" data-adj="-60" type="button">−1</button>
+              <button class="btn" data-adj="60" type="button">+1</button>
+              <button class="btn" data-adj="300" type="button">+5</button>
+            </div>
+            <div class="actions2">
+              <button class="btn" id="act-next" type="button">⏭ Nächste Runde <kbd>N</kbd></button>
+              <button class="btn danger" id="act-reset" type="button">↺ Runde neu starten</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h4><span>Auf Bildschirm 2</span><span class="seg" role="group" aria-label="Anzeige"><button class="on" data-view="timer" type="button">Timer</button><button data-view="winners" type="button">Sieger</button><button data-view="black" type="button">Schwarz</button></span></h4>
+            <div class="preview"><div class="ps-host" id="preview-host"></div></div>
+            <div class="screen-row"><span class="muted">Ausgabe: <b style="color:var(--fg)">LG TV · 1920×1080</b></span><button class="btn" type="button" style="padding:7px 10px;font-size:0.8rem">⧉ Bildschirm wählen</button></div>
+            <h4><span>Nachricht an Spieler</span></h4>
+            <div class="msg"><input id="msg-in" type="text" value="Pairings für Runde 4 hängen am Tresen aus" aria-label="Nachricht an Spieler"><button class="btn" id="msg-send" type="button">Zeigen</button></div>
+            <div class="keys" id="msg-state">Wird unten auf Bildschirm 2 eingeblendet.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="toast" id="toast" hidden><span id="toast-text"></span><button id="toast-undo" type="button">Rückgängig</button></div>
+  </div>
+</section>
+
+<section id="mockup-player">
+  <div class="sec-head prose">
+    <div class="eyebrow">4 · Mockup · Bildschirm 2</div>
+    <h2>Spieleranzeige (TV / Beamer)</h2>
+    <p class="muted">Läuft synchron mit dem Control Panel. Größere, ruhigere Ziffern mit festen Breiten, ein Fortschrittsbalken, und nach Zeitablauf zählt eine Überzeit mit (hilfreich für Judges bei „+3 Züge“-Regeln).</p>
+  </div>
+  <div class="demo-bar"><span>Zustand testen:</span>
+    <button class="btn" data-jump="1800" type="button">30:00 läuft</button>
+    <button class="btn" data-jump="285" type="button">Letzte 5 Min</button>
+    <button class="btn" data-jump="6" type="button">Letzte Sekunden</button>
+    <button class="btn" data-jump="final" type="button">Finale Runde</button>
+    <button class="btn" data-jump="winners" type="button">Siegerehrung</button>
+  </div>
+  <div class="device">
+    <div class="device-label"><span>Bildschirm 2 · Vollbild, kein Mauszeiger, keine Bedienelemente</span><span>16:9</span></div>
+    <div class="ps-host" id="player-host"></div>
+  </div>
+</section>
+
+<section id="mockup-setup">
+  <div class="sec-head prose">
+    <div class="eyebrow">5 · Mockup · Setup &amp; Abschluss</div>
+    <h2>Event in drei Schritten, Sieger erst am Ende</h2>
+    <p class="muted">Statt eines langen Formulars neben dem Timer: ein Assistent, der mit einem Preset startet. Siegernamen werden erst beim Beenden abgefragt.</p>
+  </div>
+  <div class="two">
+    <div class="mock">
+      <div class="steps"><span class="on">1 · Vorlage</span><span>2 · Details</span><span>3 · Tische</span></div>
+      <h3>Neues Event starten</h3>
+      <div class="preset-grid">
+        <button class="preset on" type="button"><b>Lorcana Weekly</b><span>BO1 · 4 × 50 Min</span></button>
+        <button class="preset" type="button"><b>Pokémon Casual</b><span>BO1 · 3 × 30 Min</span></button>
+        <button class="preset" type="button"><b>Commander Night</b><span>BO3 · 1 × 60 Min</span></button>
+        <button class="preset" type="button"><b>+ Leer beginnen</b><span>Alles selbst festlegen</span></button>
+      </div>
+      <div class="field"><label>Eventname</label><div class="in">Lorcana Weekly League – 3. Oktober</div><span class="saved">Gespeichert ✓</span></div>
+      <div class="row2">
+        <div class="field"><label>Rundenlänge</label><div class="in"><span>50 Min</span><span class="muted">− +</span></div></div>
+        <div class="field"><label>Runden</label><div class="in"><span>4</span><span class="muted">− +</span></div></div>
+      </div>
+      <div class="field"><label>Format</label><div class="chips"><span class="on">BO1</span><span>BO3</span></div></div>
+      <div class="field"><label>Tische (1–12 von 24)</label><div class="mini-tables" id="mini-tables"></div><span class="hint">Tippen zum An/Abwählen statt „1-6,9-12“ eintippen</span></div>
+      <button class="btn primary" type="button">Weiter zu Live →</button>
+    </div>
+
+    <div class="mock">
+      <div class="cap">Öffnet sich, wenn in der letzten Runde „Event beenden“ gedrückt wird.</div>
+      <div class="dialog">
+        <h3>Event beenden</h3>
+        <p class="muted" style="font-size:0.92rem">Die Namen erscheinen auf Bildschirm 2. Leere Plätze werden ausgeblendet.</p>
+        <div class="place" style="--pc: var(--warn)"><i>1</i><div class="field"><div class="in">Mira K.</div></div></div>
+        <div class="place" style="--pc: #C0C7D2"><i>2</i><div class="field"><div class="in">Jonas T.</div></div></div>
+        <div class="place" style="--pc: var(--late)"><i>3</i><div class="field"><div class="in muted">Name (optional)</div></div></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="btn" type="button">Abbrechen</button><button class="btn gold" type="button">🏆 Siegerehrung zeigen</button></div>
+      </div>
+      <div class="cap">Weitere kleine Verbesserungen: Ton/Gong bei 5 Min und 0:00 (abschaltbar), Bildschirmschoner während eines Events blockieren (<code>powerSaveBlocker</code>), Presets als Datei exportieren/importieren.</div>
+    </div>
+  </div>
+</section>
+
+<section id="second-screen">
+  <div class="sec-head prose">
+    <div class="eyebrow">6 · Technik</div>
+    <h2>So kommt der Timer auf den zweiten Bildschirm</h2>
+    <p class="muted">Der Flutter-Code kann schon einen reinen Anzeige-Modus (<code>#player</code> in der URL). Es fehlt vor allem die Electron-Seite und ein schnellerer Sync.</p>
+  </div>
+  <div class="arch">
+    <div class="box"><b>Fenster 1 · Control Panel</b><span>Primärer Bildschirm. Einzige Stelle, die den Zustand ändert und speichert.</span></div>
+    <div class="mid"><svg viewBox="0 0 90 22" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 11h84M76 4l9 7-9 7"/></svg>BroadcastChannel<br>oder Electron-IPC</div>
+    <div class="box"><b>Fenster 2 · Spieleranzeige</b><span><code>/#/player</code>, Vollbild auf dem externen Bildschirm, rahmenlos, nur lesend.</span></div>
+    <div class="box full"><b>Electron <code>main.js</code></b><span>Erkennt Bildschirme mit <code>screen.getAllDisplays()</code>, öffnet Fenster 2 auf dem externen Bildschirm, merkt sich die Wahl, reagiert auf An-/Abstecken. Ohne zweiten Bildschirm bleibt der heutige Vollbild-Modus als Fallback. Im Browser geht dasselbe per <code>window.open('/#/player')</code> bzw. Window Management API.</span></div>
+  </div>
+<pre><span class="c">// main.js – Skizze</span>
+<span class="k">const</span> { app, BrowserWindow, screen, ipcMain } = require(<span class="k">'electron'</span>);
+
+<span class="k">function</span> openPlayerWindow(displayId) {
+  <span class="k">const</span> displays = screen.getAllDisplays();
+  <span class="k">const</span> target = displays.find(d =&gt; d.id === displayId)
+    ?? displays.find(d =&gt; d.id !== screen.getPrimaryDisplay().id);
+  <span class="k">if</span> (!target) <span class="k">return</span> <span class="k">null</span>; <span class="c">// kein 2. Bildschirm → Fallback: Vollbild im Hauptfenster</span>
+
+  <span class="k">const</span> win = <span class="k">new</span> BrowserWindow({
+    ...target.bounds, frame: <span class="k">false</span>, fullscreen: <span class="k">true</span>, backgroundColor: <span class="k">'#06101F'</span>,
+    webPreferences: { contextIsolation: <span class="k">true</span>, preload: path.join(__dirname, <span class="k">'preload.js'</span>) },
+  });
+  win.loadURL(`http://127.0.0.1:${PORT}/#/player`);
+  <span class="k">return</span> win;
+}
+
+screen.on(<span class="k">'display-added'</span>,   () =&gt; mainWin.webContents.send(<span class="k">'displays-changed'</span>));
+screen.on(<span class="k">'display-removed'</span>, () =&gt; mainWin.webContents.send(<span class="k">'displays-changed'</span>));
+ipcMain.handle(<span class="k">'player:open'</span>, (_e, id) =&gt; !!openPlayerWindow(id));</pre>
+</section>
+
+<section id="plan">
+  <div class="sec-head prose">
+    <div class="eyebrow">7 · Umsetzung</div>
+    <h2>Vorschlag für die Reihenfolge</h2>
+  </div>
+  <div class="phases">
+    <div class="phase" style="--c: var(--crit)"><div class="eyebrow">Phase 1 · Fixes</div><h3>Stabil machen</h3><ul><li><b>Autosave</b> für alle Felder, keine verlorenen Eingaben</li><li>Preset-Löschen mit Rückgängig, Bearbeiten per ID statt Index</li><li>Electron: Port-Fehler, Single-Instance, Versionen pinnen</li><li>Timer mit <code>endsAt</code> + 250&nbsp;ms-Tick</li><li>Dropdown über <code>gameOptions</code></li></ul></div>
+    <div class="phase" style="--c: var(--accent)"><div class="eyebrow">Phase 2 · Second Screen</div><h3>Zwei Fenster</h3><ul><li>Electron öffnet Anzeige auf externem Bildschirm</li><li>Bildschirmauswahl + Erinnerung der Wahl</li><li>Sync per BroadcastChannel/IPC, nur Control Panel schreibt</li><li>Live-Vorschau im Control Panel</li><li>Fallback: Vollbild wie bisher</li></ul></div>
+    <div class="phase" style="--c: var(--ok)"><div class="eyebrow">Phase 3 · UI</div><h3>Einfacher bedienen</h3><ul><li>Live-Ansicht mit kontextabhängiger Hauptaktion</li><li>±1 / +5 Min, Zeit direkt setzen</li><li>Tastenkürzel, Nachricht an Spieler, Schwarzbild</li><li>Setup-Assistent, Tisch-Auswahl per Klick</li><li>Sieger-Dialog beim Beenden, Ton-Signale</li></ul></div>
+    <div class="phase" style="--c: var(--warn)"><div class="eyebrow">Phase 4 · Aufräumen</div><h3>Wartbar machen</h3><ul><li><code>main.dart</code> in Module aufteilen</li><li><code>dart:html</code> → <code>package:web</code>, <code>withValues</code></li><li>Unit-Tests für Timer-Modell und Tischbereiche</li><li>Versionsnummern vereinheitlichen</li></ul></div>
+  </div>
+  <p class="foot">Mockup erstellt für Repo <code>rab2385/big-ink-tcg-timer</code>, Branch <code>claude/clever-darwin-3pbt3j</code>. Alle Namen und Zeiten im Mockup sind Beispieldaten.</p>
+</section>
+
+</div>
+
+<script>
+(function () {
+  const C = { accent: '#5FB3FF', warn: '#FACC15', late: '#FB923C', crit: '#FB7185', ok: '#4ADE80' };
+  const S = {
+    event: 'Lorcana Weekly League', game: 'Disney Lorcana', format: 'BO1', tables: '1–12',
+    round: 3, total: 4, length: 50 * 60,
+    remaining: 50 * 60, endsAt: null, running: false,
+    view: 'timer', message: '', winners: ['Mira K.', 'Jonas T.', 'Lena S.']
+  };
+  let lastUndo = null, toastTimer = null;
+
+  function remaining() {
+    if (S.running && S.endsAt) return Math.ceil((S.endsAt - Date.now()) / 1000);
+    return S.remaining;
+  }
+  function fmt(sec) { const s = Math.max(0, sec); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+  function color(r) { if (r <= 60) return C.crit; if (r <= 300) return C.late; if (r <= 600) return C.warn; return C.accent; }
+  function freeze() { S.remaining = remaining(); S.endsAt = S.running ? Date.now() + S.remaining * 1000 : null; }
+  function snapshot() { freeze(); return JSON.parse(JSON.stringify(S)); }
+  function setRunning(on) { freeze(); S.running = on; S.endsAt = on ? Date.now() + S.remaining * 1000 : null; }
+  function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  function playerHTML() {
+    const r = remaining();
+    const tc = S.view === 'winners' ? C.warn : color(r);
+    if (S.view === 'black') return `<div class="ps" style="--tc:#000;background:#000"></div>`;
+    const head = `<div class="ps-head"><div class="ps-logo">BI</div><div class="t"><b>${esc(S.event)}</b><span>${esc(S.game)} · Tische ${esc(S.tables)}</span></div>`;
+    if (S.view === 'winners') {
+      const [a, b, c] = S.winners;
+      return `<div class="ps" style="--tc:${tc}">${head}<div class="ps-round">EVENT<small>BEENDET</small></div></div>
+        <div class="ps-win"><h5>Herzlichen Glückwunsch!</h5><div class="podium">
+        <div class="p2"><span>2. Platz</span><b>${esc(b)}</b></div><div class="p1"><span>1. Platz</span><b>${esc(a)}</b></div><div class="p3"><span>3. Platz</span><b>${esc(c)}</b></div></div></div>
+        <div class="ps-foot"><div class="ps-msg">Danke an alle fürs Mitspielen!</div></div></div>`;
+    }
+    const called = r <= 0;
+    const final = S.round >= S.total;
+    const state = called ? 'Time · aktuellen Zug beenden' : !S.running ? 'Pausiert' : r <= 300 ? 'Letzte 5 Minuten' : final ? 'Finale Runde läuft' : 'Runde läuft';
+    const over = called ? `<div class="ps-over">Überzeit +${fmt(-r)}</div>` : '';
+    const pct = Math.max(0, Math.min(100, (r / S.length) * 100));
+    const msg = S.message
+      ? `<div class="ps-msg custom">${esc(S.message)}</div>`
+      : `<div class="ps-msg">${called ? 'Zeit ist um. Aktuellen Zug nach Turnierregeln beenden, dann Ergebnis melden.' : 'Viel Spaß! Bitte Ergebnis nach der Runde melden.'}</div>`;
+    const cls = ['ps', called ? 'flash' : '', !S.running && !called ? 'paused' : ''].join(' ');
+    return `<div class="${cls}" style="--tc:${tc}">${head}<div class="ps-round">RUNDE ${S.round} / ${S.total}<small>${final ? 'FINALE · ' : ''}${esc(S.format)}</small></div></div>
+      <div class="ps-center"><div class="ps-time ${called ? 'called' : ''}">${called ? 'TIME' : fmt(r)}</div><div class="ps-state">${state}</div>${over}</div>
+      <div class="ps-foot"><div class="ps-bar"><i style="width:${pct}%"></i></div>${msg}</div></div>`;
+  }
+
+  const $ = id => document.getElementById(id);
+  function render() {
+    const r = remaining();
+    const html = playerHTML();
+    $('player-host').innerHTML = html;
+    $('preview-host').innerHTML = html;
+
+    const tc = color(r);
+    const time = $('cp-time');
+    time.textContent = r <= 0 ? 'TIME' : fmt(r);
+    time.style.setProperty('--tc', tc);
+    $('cp-progress').style.width = Math.max(0, Math.min(100, (r / S.length) * 100)) + '%';
+    $('cp-progress').style.setProperty('--tc', tc);
+    $('cp-sub').textContent = r <= 0 ? `Zeit gerufen · Überzeit +${fmt(-r)}`
+      : S.running ? 'Endet um ' + new Date(S.endsAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr'
+      : 'Pausiert · Leertaste startet';
+
+    const st = $('cp-status');
+    const [label, c] = S.view === 'winners' ? ['Siegerehrung', C.warn] : r <= 0 ? ['Time', C.crit] : S.running ? ['Läuft', C.ok] : ['Pausiert', C.warn];
+    st.textContent = label; st.style.setProperty('--c', c);
+
+    const final = S.round >= S.total;
+    $('cp-round-label').textContent = `Runde ${S.round} von ${S.total}`;
+    $('cp-final').hidden = !final;
+    $('cp-stepper').innerHTML = Array.from({ length: S.total }, (_, i) => `<i class="${i + 1 < S.round ? 'done' : i + 1 === S.round ? 'now' : ''}"></i>`).join('');
+
+    const main = $('act-main');
+    if (r <= 0 && final) { main.className = 'btn gold'; main.innerHTML = '🏆 Event beenden'; }
+    else if (r <= 0) { main.className = 'btn primary'; main.innerHTML = '⏭ Nächste Runde <kbd>N</kbd>'; }
+    else { main.className = 'btn primary'; main.innerHTML = (S.running ? '❚❚ Pause' : '▶ Start') + ' <kbd>Space</kbd>'; }
+    $('act-next').innerHTML = final ? '🏆 Event beenden' : '⏭ Nächste Runde <kbd>N</kbd>';
+
+    document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === S.view));
+    $('msg-send').textContent = S.message ? 'Ausblenden' : 'Zeigen';
+    $('msg-state').textContent = S.message ? 'Wird gerade auf Bildschirm 2 angezeigt.' : 'Wird unten auf Bildschirm 2 eingeblendet.';
+  }
+
+  function toast(text, undo) {
+    lastUndo = undo;
+    $('toast-text').textContent = text;
+    $('toast-undo').hidden = !undo;
+    $('toast').hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { $('toast').hidden = true; lastUndo = null; }, 8000);
+  }
+  function restore(snap) { Object.assign(S, snap); if (S.running) S.endsAt = Date.now() + S.remaining * 1000; render(); }
+
+  function nextRound() {
+    const before = snapshot();
+    if (S.round >= S.total) { S.view = 'winners'; setRunning(false); toast('Siegerehrung wird angezeigt', () => restore(before)); render(); return; }
+    S.round++; S.running = false; S.remaining = S.length; S.endsAt = null; S.view = 'timer';
+    toast(`Runde ${S.round} vorbereitet · Timer steht auf ${fmt(S.length)}`, () => restore(before));
+    render();
+  }
+  function mainAction() {
+    const r = remaining();
+    if (S.view === 'winners') return;
+    if (r <= 0) return nextRound();
+    setRunning(!S.running); render();
+  }
+  function adjust(delta) {
+    const before = snapshot();
+    freeze(); S.remaining = Math.max(0, S.remaining + delta);
+    if (S.running) S.endsAt = Date.now() + S.remaining * 1000;
+    toast(`${delta > 0 ? '+' : '−'}${Math.abs(delta / 60)} Min · neu: ${fmt(S.remaining)}`, () => restore(before));
+    render();
+  }
+
+  $('act-main').addEventListener('click', mainAction);
+  $('act-next').addEventListener('click', nextRound);
+  $('act-reset').addEventListener('click', () => { const b = snapshot(); S.running = false; S.endsAt = null; S.remaining = S.length; toast('Runde zurückgesetzt', () => restore(b)); render(); });
+  document.querySelectorAll('[data-adj]').forEach(b => b.addEventListener('click', () => adjust(+b.dataset.adj)));
+  document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => { S.view = b.dataset.view; render(); }));
+  $('msg-send').addEventListener('click', () => { S.message = S.message ? '' : $('msg-in').value.trim(); render(); });
+  $('toast-undo').addEventListener('click', () => { if (lastUndo) lastUndo(); $('toast').hidden = true; lastUndo = null; });
+  document.querySelectorAll('[data-jump]').forEach(b => b.addEventListener('click', () => {
+    const j = b.dataset.jump;
+    if (j === 'winners') { S.view = 'winners'; S.running = false; S.endsAt = null; }
+    else if (j === 'final') { S.view = 'timer'; S.round = S.total; S.remaining = 1500; setRunning(true); }
+    else { S.view = 'timer'; if (S.round >= S.total) S.round = 3; S.remaining = +j; setRunning(true); }
+    render();
+  }));
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('input, textarea')) return;
+    if (e.code === 'Space') { e.preventDefault(); mainAction(); }
+    else if (e.key === 'ArrowLeft') adjust(-60);
+    else if (e.key === 'ArrowRight') adjust(60);
+    else if (e.key === 'n' || e.key === 'N') nextRound();
+    else if (e.key === 'b' || e.key === 'B') { S.view = S.view === 'black' ? 'timer' : 'black'; render(); }
+  });
+
+  $('mini-tables').innerHTML = Array.from({ length: 24 }, (_, i) => `<i class="${i < 12 ? 'a' : ''}" title="Tisch ${i + 1}"></i>`).join('');
+
+  render();
+  setInterval(render, 250);
+})();
+</script>
