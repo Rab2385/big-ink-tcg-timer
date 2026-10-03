@@ -176,6 +176,9 @@ function openPlayerWindow(displayId) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // The round sounds play on the TV; nobody clicks in this window.
+      autoplayPolicy: 'no-user-gesture-required',
+      backgroundThrottling: false,
     },
   });
 

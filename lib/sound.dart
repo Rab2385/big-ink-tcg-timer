@@ -34,8 +34,23 @@ extension type _Gain._(JSObject _) implements _AudioNode {
   external _AudioParam get gain;
 }
 
+/// The sounds the control window can ask the player window to play.
+abstract final class SoundCue {
+  static const warning = 'warning';
+  static const timeUp = 'time-up';
+}
+
 class SoundPlayer {
   _AudioContext? _context;
+
+  /// True once the browser lets this window play sound.
+  bool get isReady {
+    try {
+      return _context?.state == 'running';
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// Browsers only allow audio after a user action. Call this from a click
   /// or key handler (e.g. Start) so later chimes can play on their own.

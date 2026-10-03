@@ -352,6 +352,17 @@ class ScreenPanel extends StatelessWidget {
           PlayerPreview(state: state),
           const SizedBox(height: 12),
           Text(output, style: softText),
+          const SizedBox(height: 4),
+          Text(
+            !state.soundEnabled
+                ? 'Sound is off (Setup → Details).'
+                : app.soundOnPlayerScreen
+                    ? 'Sound plays on the player screen (TV speakers).'
+                    : status.playerOpen
+                        ? 'Sound plays on this laptop. Click once in the player window to play it on the TV.'
+                        : 'Sound plays on this laptop until the player screen is open.',
+            style: softText.copyWith(fontSize: 13),
+          ),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,

@@ -120,10 +120,17 @@ restart.
 
 ### Sound
 
-When a running round reaches 0:00, the control laptop rings a bell three
-times. At 5 minutes left it plays a short chime. Both can be switched off in
-Setup, and the volume can be set there. The sound comes from the laptop, so
-make sure its speakers are on (or connected to the store's speakers).
+When a running round reaches 0:00, a bell rings three times. At 5 minutes left
+a short chime plays. Both can be switched off in Setup, and the volume can be
+set there (with **Test 5 min** and **Test TIME** buttons).
+
+The sounds play on the **player screen**, so they come out of the TV speakers.
+The Live page shows where sound currently plays:
+
+- **Desktop app:** the TV window plays sound right away.
+- **Browser popup:** browsers only allow sound after a click, so click once in
+  the player window. Until then the laptop plays the sounds.
+- **No player screen open**, or **Full Screen Here:** the laptop plays them.
 
 ---
 

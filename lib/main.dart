@@ -103,19 +103,23 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
     syncChannel = html.BroadcastChannel(syncChannelName);
     syncSubscription = syncChannel!.onMessage.listen(_onSyncMessage);
 
+    // Browsers only allow sound after a click or key press. Unlock audio on
+    // the first one, so the sounds can play later on their own. (The desktop
+    // app allows sound right away.)
+    sound.prime();
+    audioUnlockSubscription = html.document.on['pointerdown'].listen((_) {
+      sound.prime();
+      if (playerOnly) _reportPlayerAlive();
+    });
+
     if (playerOnly) {
       // Ask the control window for the current state right away.
       _post({'type': 'hello'});
+      _reportPlayerAlive();
       wakeLock.keepOn();
     } else {
       display.start();
       HardwareKeyboard.instance.addHandler(_handleKey);
-      // Browsers only allow sound after a click or key press. Unlock audio
-      // on the first one, so the end-of-round sound can play later on its
-      // own. (The desktop app allows sound right away.)
-      sound.prime();
-      audioUnlockSubscription =
-          html.document.on['pointerdown'].listen((_) => sound.prime());
     }
 
     fullscreenSubscription = html.document.onFullscreenChange.listen((_) {
@@ -133,6 +137,7 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
         // Updates arrive over the sync channel. Re-reading the saved state
         // every few seconds is only a safety net.
         if (_tickCount % 12 == 0) await _reloadForPlayerScreen();
+        if (_tickCount % 8 == 0) _reportPlayerAlive();
       } else {
         _playSounds();
         // Only the control window writes state. The player window just
@@ -283,11 +288,20 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
       final type = message['type'];
       if (type == 'hello' && !playerOnly) {
         _broadcastState();
+      } else if (type == 'player-alive' && !playerOnly) {
+        _playerSoundReadyAt = message['audio'] == true
+            ? DateTime.now().millisecondsSinceEpoch
+            : 0;
       } else if (type == 'state' && playerOnly) {
         final next = TimerStateModel.fromJson(
           message['state'] as Map<String, dynamic>,
         );
         if (mounted) setState(() => state = next);
+      } else if (type == 'sound' && playerOnly) {
+        _playLocally(
+          message['sound'] as String?,
+          (message['volume'] as num?)?.toDouble() ?? state.soundVolume,
+        );
       }
     } catch (_) {
       // Ignore messages from other versions of the app.
@@ -721,7 +735,7 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
       return;
     }
     if (previous > 300 && remaining <= 300 && remaining > 0) {
-      sound.warning(state.soundVolume);
+      _playSound(SoundCue.warning);
     }
   }
 
@@ -733,7 +747,34 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
     if (!state.soundEnabled || state.eventFinished) return;
     final late = DateTime.now().millisecondsSinceEpoch - state.endsAtMillis;
     if (late > 15000) return;
-    sound.timeUp(state.soundVolume);
+    _playSound(SoundCue.timeUp);
+  }
+
+  /// When the player window last said it can play sound (0 = it cannot).
+  int _playerSoundReadyAt = 0;
+
+  /// True while a player window is open and able to play sound. It reports
+  /// in every 2 seconds.
+  bool get soundOnPlayerScreen =>
+      DateTime.now().millisecondsSinceEpoch - _playerSoundReadyAt < 5000;
+
+  /// Plays a cue on the player screen (the TV speakers). If no player window
+  /// can play sound, the laptop plays it instead so it is never lost.
+  void _playSound(String cue) {
+    if (soundOnPlayerScreen) {
+      _post({'type': 'sound', 'sound': cue, 'volume': state.soundVolume});
+    } else {
+      _playLocally(cue, state.soundVolume);
+    }
+  }
+
+  void _playLocally(String? cue, double volume) {
+    if (cue == SoundCue.warning) sound.warning(volume);
+    if (cue == SoundCue.timeUp) sound.timeUp(volume);
+  }
+
+  void _reportPlayerAlive() {
+    _post({'type': 'player-alive', 'audio': sound.isReady});
   }
 
   // ---------------------------------------------------------------------
@@ -762,15 +803,13 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
   }
 
   void testWarningSound() {
-    sound
-      ..prime()
-      ..warning(state.soundVolume);
+    sound.prime();
+    _playSound(SoundCue.warning);
   }
 
   void testTimeUpSound() {
-    sound
-      ..prime()
-      ..timeUp(state.soundVolume);
+    sound.prime();
+    _playSound(SoundCue.timeUp);
   }
 
   // ---------------------------------------------------------------------
