@@ -29,11 +29,10 @@ It includes:
 - Messages to players ("Pairings are up")
 - Black screen and winner podium on demand
 - Overtime counter and an optional note after TIME
-- Optional sound signals at 5 minutes and at TIME
-- Event setup in three steps, with clickable table selection
+- Sound effect when the timer reaches zero (a bell), and a chime at 5 minutes
+- Event setup in two steps
 - Editable event presets
 - Custom logo toggle
-- Table overview
 - Local saving
 
 ---
@@ -91,7 +90,7 @@ Connect the TV or beamer, then press **Show on Screen 2** on the Live page.
 The player screen window is the same app opened with `?view=player`. It only
 reads the event state and never changes it. Changes reach it immediately.
 
-The player screen shows the logo, event name, game, tables, round, BO1 / BO3,
+The player screen shows the logo, event name, game, round, BO1 / BO3,
 the timer with a progress bar, and a status line. A message from the Live page
 replaces the bottom line.
 
@@ -109,7 +108,7 @@ overtime counter.
 
 ### Setup
 
-Setup has three steps. Every change is saved automatically. A running timer is
+Setup has two steps. Every change is saved automatically. A running timer is
 never changed by Setup. A new round length applies from the next round or a
 restart.
 
@@ -117,9 +116,14 @@ restart.
    current settings and start over.
 2. **Details:** event name, game, BO1 / BO3, round length, total rounds,
    current round, the note shown at TIME, custom logo, and sound signals with
-   volume and a test button.
-3. **Tables:** number of tables in the store, and the tables used. Click tables
-   in the grid, or type a range such as `1-6,9-12`.
+   volume and test buttons.
+
+### Sound
+
+When a running round reaches 0:00, the control laptop rings a bell three
+times. At 5 minutes left it plays a short chime. Both can be switched off in
+Setup, and the volume can be set there. The sound comes from the laptop, so
+make sure its speakers are on (or connected to the store's speakers).
 
 ---
 
@@ -127,22 +131,6 @@ restart.
 
 In the final round, **Finish Event** asks for the top three. The player screen
 then shows the podium. Places without a name are left out.
-
----
-
-### Tables
-
-The Tables page gives a simple visual overview of table usage.
-
-Active event tables are highlighted based on the selected table range.
-
-Examples:
-
-```text
-1-12
-1-6,9-12
-3,5,7
-```
 
 ---
 
@@ -157,7 +145,6 @@ A preset stores:
 - Match format
 - Round length
 - Total rounds
-- Tables used
 - Note shown at TIME (optional)
 
 A preset does **not** store:
@@ -372,7 +359,6 @@ The `.exe` needs the bundled files and assets beside it.
 ✅ Load preset
 ✅ Custom logo toggle
 ✅ BO1 / BO3 display
-✅ Table overview
 ```
 
 ---
@@ -418,7 +404,6 @@ Possible future versions:
 
 - Event A / Event B
 - Separate timers
-- Separate table ranges
 - Split player screen
 
 ---

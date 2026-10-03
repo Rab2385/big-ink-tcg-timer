@@ -1,11 +1,10 @@
-// Event setup in three steps: pick a template, adjust the details, choose
-// the tables. Every change is saved right away.
+// Event setup in two steps: pick a template, then adjust the details.
+// Every change is saved right away.
 import 'package:flutter/material.dart';
 
 import 'package:flutter_application_ft_event_timer/main.dart';
 
 const _accent = Color(0xFF5FB3FF);
-const _green = Color(0xFF4ADE80);
 const _muted = Color(0xFF8A9BB5);
 
 class SetupPage extends StatefulWidget {
@@ -20,7 +19,7 @@ class SetupPage extends StatefulWidget {
 class _SetupPageState extends State<SetupPage> {
   int step = 0;
 
-  static const steps = ['Template', 'Details', 'Tables'];
+  static const steps = ['Template', 'Details'];
 
   BigInkTimerAppState get app => widget.app;
 
@@ -54,8 +53,7 @@ class _SetupPageState extends State<SetupPage> {
           AppCard(
             child: switch (step) {
               0 => _TemplateStep(app: app, onPicked: () => goToStep(1)),
-              1 => _DetailsStep(app: app),
-              _ => _TablesStep(app: app),
+              _ => _DetailsStep(app: app),
             },
           ),
           const SizedBox(height: 16),
@@ -120,7 +118,7 @@ class _TemplateStep extends StatelessWidget {
               _TemplateCard(
                 title: preset.name,
                 detail: '${preset.game} · ${preset.matchFormat}\n'
-                    '${preset.rounds} × ${preset.roundLengthMinutes} min · Tables ${preset.tables}',
+                    '${preset.rounds} × ${preset.roundLengthMinutes} min',
                 onTap: () async {
                   await app.loadPreset(preset);
                   onPicked();
@@ -338,7 +336,7 @@ class _DetailsStep extends StatelessWidget {
                       style: TextStyle(fontWeight: FontWeight.w900),
                     ),
                     subtitle: const Text(
-                      'A chime at 5 minutes left and at TIME.',
+                      'A chime at 5 minutes left and a bell at TIME.',
                       style: softText,
                     ),
                     value: state.soundEnabled,
@@ -356,8 +354,14 @@ class _DetailsStep extends StatelessWidget {
                         ),
                       ),
                       TextButton(
-                        onPressed: state.soundEnabled ? app.testSound : null,
-                        child: const Text('Test'),
+                        onPressed:
+                            state.soundEnabled ? app.testWarningSound : null,
+                        child: const Text('Test 5 min'),
+                      ),
+                      TextButton(
+                        onPressed:
+                            state.soundEnabled ? app.testTimeUpSound : null,
+                        child: const Text('Test TIME'),
                       ),
                     ],
                   ),
@@ -367,139 +371,6 @@ class _DetailsStep extends StatelessWidget {
           ],
         );
       },
-    );
-  }
-}
-
-class _TablesStep extends StatelessWidget {
-  const _TablesStep({required this.app});
-
-  final BigInkTimerAppState app;
-
-  @override
-  Widget build(BuildContext context) {
-    final count = clampInt(int.tryParse(app.tableCount.text) ?? 24, 1, 120);
-    final selected = parseTableRange(app.tableRange.text);
-
-    void setTables(Set<int> tables) {
-      if (tables.isEmpty) return;
-      app.tableRange.text = formatTableRange(tables);
-      app.saveFields();
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 16,
-          runSpacing: 16,
-          crossAxisAlignment: WrapCrossAlignment.end,
-          children: [
-            SizedBox(
-              width: 260,
-              child: NumberStepper(
-                label: 'Tables in the store',
-                controller: app.tableCount,
-                min: 1,
-                max: 120,
-                onChanged: app.scheduleAutosave,
-              ),
-            ),
-            SizedBox(
-              width: 320,
-              child: TextField(
-                controller: app.tableRange,
-                decoration: InputDecoration(
-                  labelText: 'Tables used',
-                  hintText: '1-12 or 1-6,9-12',
-                  errorText: selected == null
-                      ? 'Use numbers and ranges, e.g. 1-6,9-12'
-                      : null,
-                ),
-                onChanged: (text) {
-                  if (parseTableRange(text) != null) app.scheduleAutosave();
-                },
-              ),
-            ),
-            OutlinedButton(
-              onPressed: () =>
-                  setTables({for (var table = 1; table <= count; table++) table}),
-              child: const Text('Select all'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Click tables to add or remove them. '
-          '${selected?.length ?? 0} of $count selected.',
-          style: softText,
-        ),
-        const SizedBox(height: 14),
-        TablePicker(
-          count: count,
-          selected: selected ?? const {},
-          onToggle: (table) {
-            final next = {...?selected};
-            if (!next.remove(table)) next.add(table);
-            setTables(next);
-          },
-        ),
-      ],
-    );
-  }
-}
-
-/// A grid of table numbers. Selected tables are highlighted.
-class TablePicker extends StatelessWidget {
-  const TablePicker({
-    required this.count,
-    required this.selected,
-    required this.onToggle,
-    super.key,
-  });
-
-  final int count;
-  final Set<int> selected;
-  final ValueChanged<int> onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (var table = 1; table <= count; table++)
-          SizedBox(
-            width: 64,
-            height: 48,
-            child: Material(
-              color: selected.contains(table)
-                  ? _accent.withOpacity(0.28)
-                  : _green.withOpacity(0.06),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: BorderSide(
-                  color: selected.contains(table)
-                      ? _accent
-                      : Colors.white.withOpacity(0.16),
-                ),
-              ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(10),
-                onTap: () => onToggle(table),
-                child: Center(
-                  child: Text(
-                    '$table',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      color: selected.contains(table) ? Colors.white : _muted,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
     );
   }
 }
@@ -554,51 +425,4 @@ class NumberStepper extends StatelessWidget {
       onChanged: (_) => onChanged(),
     );
   }
-}
-
-/// Reads a table list such as "1-6,9-12" or "3, 5, 7". Returns null if any
-/// part is not a positive number or range.
-Set<int>? parseTableRange(String text) {
-  final cleaned = text.replaceAll('–', '-').replaceAll(' ', '');
-  if (cleaned.isEmpty) return null;
-
-  final tables = <int>{};
-  for (final part in cleaned.split(',')) {
-    if (part.isEmpty) continue;
-    final bounds = part.split('-');
-    if (bounds.length == 1) {
-      final table = int.tryParse(bounds[0]);
-      if (table == null || table < 1) return null;
-      tables.add(table);
-    } else if (bounds.length == 2) {
-      final a = int.tryParse(bounds[0]);
-      final b = int.tryParse(bounds[1]);
-      if (a == null || b == null || a < 1 || b < 1) return null;
-      final low = a < b ? a : b;
-      final high = a < b ? b : a;
-      if (high - low > 999) return null;
-      for (var table = low; table <= high; table++) {
-        tables.add(table);
-      }
-    } else {
-      return null;
-    }
-  }
-  return tables.isEmpty ? null : tables;
-}
-
-/// Writes tables as compact ranges: {1,2,3,5,9,10} → "1-3,5,9-10".
-String formatTableRange(Iterable<int> tables) {
-  final sorted = tables.toSet().toList()..sort();
-  final parts = <String>[];
-  var i = 0;
-  while (i < sorted.length) {
-    var j = i;
-    while (j + 1 < sorted.length && sorted[j + 1] == sorted[j] + 1) {
-      j++;
-    }
-    parts.add(i == j ? '${sorted[i]}' : '${sorted[i]}-${sorted[j]}');
-    i = j + 1;
-  }
-  return parts.join(',');
 }

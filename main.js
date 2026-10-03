@@ -255,6 +255,10 @@ async function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      // The end-of-round bell must play even right after a restart, before
+      // anyone clicked, and on time while the window is in the background.
+      autoplayPolicy: 'no-user-gesture-required',
+      backgroundThrottling: false,
     },
   });
 

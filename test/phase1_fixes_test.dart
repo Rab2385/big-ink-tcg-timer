@@ -104,7 +104,7 @@ void main() {
 
   group('Presets (#5, #10)', () {
     test('presets keep their id through JSON and old ones get one', () {
-      final preset = EventPreset('Test', 'Pokémon', 'BO1', 30, 3, '1-4');
+      final preset = EventPreset('Test', 'Pokémon', 'BO1', 30, 3);
       final copy = EventPreset.fromJson(preset.toJson());
       expect(copy.id, preset.id);
 

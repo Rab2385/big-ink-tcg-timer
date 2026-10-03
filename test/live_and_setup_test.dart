@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_application_ft_event_timer/live_page.dart';
 import 'package:flutter_application_ft_event_timer/main.dart';
-import 'package:flutter_application_ft_event_timer/setup_page.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -82,26 +81,6 @@ void main() {
     test('progress goes from 1 to 0 over the round', () {
       final state = pausedAt(25 * 60).copyWith(roundLengthMinutes: 50);
       expect(state.progress, closeTo(0.5, 0.001));
-    });
-  });
-
-  group('Table ranges (#25)', () {
-    test('parse ranges, lists and reversed ranges', () {
-      expect(parseTableRange('1-3,5'), {1, 2, 3, 5});
-      expect(parseTableRange(' 9 – 7 '), {7, 8, 9});
-      expect(parseTableRange('3,5,7,'), {3, 5, 7});
-    });
-
-    test('reject invalid input', () {
-      expect(parseTableRange(''), isNull);
-      expect(parseTableRange('1-a'), isNull);
-      expect(parseTableRange('0'), isNull);
-      expect(parseTableRange('1-2-3'), isNull);
-    });
-
-    test('format as compact ranges', () {
-      expect(formatTableRange({5, 1, 2, 3, 9, 10}), '1-3,5,9-10');
-      expect(formatTableRange({4}), '4');
     });
   });
 
@@ -312,6 +291,27 @@ void main() {
     });
   });
 
+  group('Tables removed', () {
+    testWidgets('no Tables page, setup step or table text', (tester) async {
+      await pumpApp(tester);
+      expect(find.textContaining('Tables'), findsNothing);
+      await tester.tap(find.text('Setup'));
+      await settle(tester);
+      expect(find.textContaining('Tables'), findsNothing);
+      expect(find.text('2 · Details'), findsOneWidget);
+      await unmountApp(tester);
+    });
+
+    test('old saved data with tables still loads', () {
+      final json = pausedAt(60).toJson()
+        ..['tableRange'] = '1-12'
+        ..['tableCount'] = 24;
+      expect(TimerStateModel.fromJson(json).remainingNow, 60);
+      final preset = EventPreset.fromJson({'name': 'Old', 'tables': '1-8'});
+      expect(preset.name, 'Old');
+    });
+  });
+
   group('Setup', () {
     testWidgets('loading a preset from step 1 starts at round 1 (#24)',
         (tester) async {
@@ -327,23 +327,6 @@ void main() {
       expect(saved['remainingSeconds'], 3600);
       // The wizard moves on to the details step.
       expect(find.widgetWithText(TextField, 'Event name'), findsOneWidget);
-      await unmountApp(tester);
-    });
-
-    testWidgets('clicking tables updates the table range (#25)',
-        (tester) async {
-      await pumpApp(tester);
-      await tester.tap(find.text('Setup'));
-      await settle(tester);
-      await tester.tap(find.text('3 · Tables'));
-      await settle(tester);
-
-      // Default is 1-12; remove table 12 and add table 14.
-      await tester.tap(find.text('12'));
-      await settle(tester);
-      await tester.tap(find.text('14'));
-      await settle(tester);
-      expect((await savedState())['tableRange'], '1-11,14');
       await unmountApp(tester);
     });
   });

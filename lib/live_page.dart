@@ -38,7 +38,7 @@ class LivePage extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     '${state.game} · ${state.matchFormat} · '
-                    '${state.roundLengthMinutes} min · Tables ${state.tableRange}',
+                    '${state.roundLengthMinutes} min',
                     style: softText,
                   ),
                 ],

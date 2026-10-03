@@ -41,7 +41,6 @@ abstract final class AppPage {
   static const live = 0;
   static const setup = 1;
   static const presets = 2;
-  static const tables = 3;
 }
 
 /// Holds the event state and every action the pages can trigger. Pages get
@@ -53,6 +52,7 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
   Timer? ticker;
   StreamSubscription<html.Event>? fullscreenSubscription;
   StreamSubscription<html.MessageEvent>? syncSubscription;
+  StreamSubscription<html.Event>? audioUnlockSubscription;
   html.BroadcastChannel? syncChannel;
 
   // The app state sits above MaterialApp, so its own context has no
@@ -90,8 +90,6 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
   final roundLength = TextEditingController();
   final currentRound = TextEditingController();
   final totalRounds = TextEditingController();
-  final tableRange = TextEditingController();
-  final tableCount = TextEditingController();
   final timeCalledNote = TextEditingController();
   final messageInput = TextEditingController();
 
@@ -112,6 +110,12 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
     } else {
       display.start();
       HardwareKeyboard.instance.addHandler(_handleKey);
+      // Browsers only allow sound after a click or key press. Unlock audio
+      // on the first one, so the end-of-round sound can play later on its
+      // own. (The desktop app allows sound right away.)
+      sound.prime();
+      audioUnlockSubscription =
+          html.document.on['pointerdown'].listen((_) => sound.prime());
     }
 
     fullscreenSubscription = html.document.onFullscreenChange.listen((_) {
@@ -134,6 +138,7 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
         // Only the control window writes state. The player window just
         // reads, so it can never overwrite a change made by the admin.
         if (state.running && state.remainingNow <= 0) {
+          _playTimeUpSound();
           await _setStateModel(state.withTimeCalled());
         }
       }
@@ -148,6 +153,7 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
     autosaveTimer?.cancel();
     fullscreenSubscription?.cancel();
     syncSubscription?.cancel();
+    audioUnlockSubscription?.cancel();
     syncChannel?.close();
     display.dispose();
     wakeLock.dispose();
@@ -157,8 +163,6 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
       roundLength,
       currentRound,
       totalRounds,
-      tableRange,
-      tableCount,
       timeCalledNote,
       messageInput,
     ]) {
@@ -295,8 +299,6 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
     roundLength.text = state.roundLengthMinutes.toString();
     currentRound.text = state.currentRound.toString();
     totalRounds.text = state.totalRounds.toString();
-    tableRange.text = state.tableRange;
-    tableCount.text = state.tableCount.toString();
     timeCalledNote.text = state.timeCalledNote;
   }
 
@@ -322,7 +324,6 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
   /// round length applies from the next round or a restart.
   Future<void> saveFields() async {
     autosaveTimer?.cancel();
-    final tables = tableRange.text.trim();
 
     await _setStateModel(
       state.copyWith(
@@ -334,8 +335,6 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
         currentRound:
             clampInt(_readInt(currentRound, state.currentRound), 1, 99),
         totalRounds: clampInt(_readInt(totalRounds, state.totalRounds), 1, 99),
-        tableRange: tables.isEmpty ? state.tableRange : tables,
-        tableCount: clampInt(_readInt(tableCount, state.tableCount), 1, 120),
         timeCalledNote: timeCalledNote.text.trim(),
       ),
     );
@@ -723,9 +722,18 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
     }
     if (previous > 300 && remaining <= 300 && remaining > 0) {
       sound.warning(state.soundVolume);
-    } else if (previous > 0 && remaining == 0 && !state.eventFinished) {
-      sound.timeUp(state.soundVolume);
     }
+  }
+
+  /// Rings the bell when a running round reaches zero. Called at the moment
+  /// the timer stops, so it does not depend on catching the exact tick (the
+  /// window may be in the background). A timer that ran out long ago, e.g.
+  /// while the app was closed, stays silent.
+  void _playTimeUpSound() {
+    if (!state.soundEnabled || state.eventFinished) return;
+    final late = DateTime.now().millisecondsSinceEpoch - state.endsAtMillis;
+    if (late > 15000) return;
+    sound.timeUp(state.soundVolume);
   }
 
   // ---------------------------------------------------------------------
@@ -753,10 +761,16 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
     );
   }
 
-  void testSound() {
+  void testWarningSound() {
     sound
       ..prime()
       ..warning(state.soundVolume);
+  }
+
+  void testTimeUpSound() {
+    sound
+      ..prime()
+      ..timeUp(state.soundVolume);
   }
 
   // ---------------------------------------------------------------------
@@ -772,7 +786,6 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
       matchFormat: preset.matchFormat,
       roundLengthMinutes: preset.roundLengthMinutes,
       totalRounds: preset.rounds,
-      tableRange: preset.tables,
       timeCalledNote: preset.timeCalledNote,
     );
     await _commitWithUndo(
@@ -790,7 +803,6 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
       state.matchFormat,
       state.roundLengthMinutes,
       state.totalRounds,
-      state.tableRange,
       timeCalledNote: state.timeCalledNote,
     );
 
@@ -901,11 +913,6 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
                               selectedIcon: Icon(Icons.event),
                               label: Text('Presets'),
                             ),
-                            NavigationRailDestination(
-                              icon: Icon(Icons.grid_view_outlined),
-                              selectedIcon: Icon(Icons.grid_view),
-                              label: Text('Tables'),
-                            ),
                           ],
                         ),
                         Expanded(
@@ -926,10 +933,6 @@ class BigInkTimerAppState extends State<BigInkTimerApp> {
                                 onUpdatePreset: updatePreset,
                                 onDeletePreset: deletePreset,
                                 onRestoreDefaults: restoreDefaultPresets,
-                              ),
-                              TablesPage(
-                                key: const ValueKey('tables'),
-                                state: state,
                               ),
                             ][page],
                           ),
@@ -1031,7 +1034,7 @@ class PlayerScreen extends StatelessWidget {
                               ),
                             ),
                             Text(
-                              '${state.game} · Tables ${state.tableRange}',
+                              state.game,
                               style: softText.copyWith(
                                 fontSize: compact ? 13 : 16 * scale,
                               ),
@@ -1509,61 +1512,6 @@ class PodiumCard extends StatelessWidget {
   }
 }
 
-class TablesPage extends StatelessWidget {
-  const TablesPage({required this.state, super.key});
-
-  final TimerStateModel state;
-
-  @override
-  Widget build(BuildContext context) {
-    return PageScaffold(
-      title: 'Tables',
-      subtitle: 'Blue/Yellow/Red = event tables. Green = free tables.',
-      child: AppCard(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final columns = constraints.maxWidth > 1000
-                ? 8
-                : constraints.maxWidth > 650
-                    ? 6
-                    : 3;
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: state.tableCount,
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: columns,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.35,
-              ),
-              itemBuilder: (context, index) {
-                final table = index + 1;
-                final active = state.tableIsActive(table);
-                final color =
-                    active ? state.timerColor : const Color(0xFF4ADE80);
-                return DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
-                    color: color.withOpacity(active ? 0.22 : 0.12),
-                    border: Border.all(color: color.withOpacity(0.48)),
-                  ),
-                  child: Center(
-                    child: Text(
-                      'Table $table',
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
 class PresetsPage extends StatefulWidget {
   const PresetsPage({
     required this.presets,
@@ -1592,7 +1540,6 @@ class _PresetsPageState extends State<PresetsPage> {
   final presetName = TextEditingController();
   final presetRoundLength = TextEditingController(text: '50');
   final presetRounds = TextEditingController(text: '4');
-  final presetTables = TextEditingController(text: '1-12');
   final presetNote = TextEditingController();
 
   String presetGame = 'Disney Lorcana';
@@ -1606,7 +1553,6 @@ class _PresetsPageState extends State<PresetsPage> {
     presetName.dispose();
     presetRoundLength.dispose();
     presetRounds.dispose();
-    presetTables.dispose();
     presetNote.dispose();
     super.dispose();
   }
@@ -1619,7 +1565,6 @@ class _PresetsPageState extends State<PresetsPage> {
       presetMatchFormat = 'BO1';
       presetRoundLength.text = '50';
       presetRounds.text = '4';
-      presetTables.text = '1-12';
       presetNote.clear();
     });
   }
@@ -1634,7 +1579,6 @@ class _PresetsPageState extends State<PresetsPage> {
           : 'BO1';
       presetRoundLength.text = preset.roundLengthMinutes.toString();
       presetRounds.text = preset.rounds.toString();
-      presetTables.text = preset.tables;
       presetNote.text = preset.timeCalledNote;
     });
   }
@@ -1653,8 +1597,6 @@ class _PresetsPageState extends State<PresetsPage> {
       1,
       99,
     );
-    final tables =
-        presetTables.text.trim().isEmpty ? '1-12' : presetTables.text.trim();
 
     return EventPreset(
       name,
@@ -1662,7 +1604,6 @@ class _PresetsPageState extends State<PresetsPage> {
       presetMatchFormat,
       roundLength,
       rounds,
-      tables,
       id: editingId,
       timeCalledNote: presetNote.text.trim(),
     );
@@ -1794,16 +1735,6 @@ class _PresetsPageState extends State<PresetsPage> {
                           ),
                         ),
                         SizedBox(
-                          width: fieldWidth,
-                          child: TextField(
-                            controller: presetTables,
-                            decoration: const InputDecoration(
-                              labelText: 'Tables used',
-                              hintText: '1-12 or 1-6,9-12',
-                            ),
-                          ),
-                        ),
-                        SizedBox(
                           width: wide ? fieldWidth * 2 + 12 : fieldWidth,
                           child: TextField(
                             controller: presetNote,
@@ -1892,7 +1823,7 @@ class _PresetsPageState extends State<PresetsPage> {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          '${preset.game} · ${preset.matchFormat}\n${preset.rounds} rounds · ${preset.roundLengthMinutes} min\nTables ${preset.tables}'
+                          '${preset.game} · ${preset.matchFormat}\n${preset.rounds} rounds · ${preset.roundLengthMinutes} min'
                           '${preset.timeCalledNote.isEmpty ? '' : '\nAt TIME: ${preset.timeCalledNote}'}',
                           style: softText,
                         ),
@@ -2066,8 +1997,6 @@ class TimerStateModel {
     required this.roundLengthMinutes,
     required this.currentRound,
     required this.totalRounds,
-    required this.tableRange,
-    required this.tableCount,
     required this.useCustomLogo,
     required this.eventFinished,
     required this.firstPlace,
@@ -2093,8 +2022,6 @@ class TimerStateModel {
       roundLengthMinutes: 50,
       currentRound: 1,
       totalRounds: 6,
-      tableRange: '1-12',
-      tableCount: 24,
       useCustomLogo: false,
       eventFinished: false,
       firstPlace: '',
@@ -2126,8 +2053,6 @@ class TimerStateModel {
       roundLengthMinutes: (json['roundLengthMinutes'] as num?)?.toInt() ?? 50,
       currentRound: (json['currentRound'] as num?)?.toInt() ?? 1,
       totalRounds: (json['totalRounds'] as num?)?.toInt() ?? 4,
-      tableRange: json['tableRange'] as String? ?? '1-12',
-      tableCount: (json['tableCount'] as num?)?.toInt() ?? 24,
       useCustomLogo: json['useCustomLogo'] as bool? ?? false,
       eventFinished: json['eventFinished'] as bool? ?? false,
       firstPlace: json['firstPlace'] as String? ?? '',
@@ -2153,8 +2078,6 @@ class TimerStateModel {
   final int roundLengthMinutes;
   final int currentRound;
   final int totalRounds;
-  final String tableRange;
-  final int tableCount;
   final bool useCustomLogo;
   final bool eventFinished;
   final String firstPlace;
@@ -2275,26 +2198,6 @@ class TimerStateModel {
   TimerStateModel withFreshTimestamp() =>
       copyWith(lastUpdateMillis: DateTime.now().millisecondsSinceEpoch);
 
-  bool tableIsActive(int number) {
-    final parts =
-        tableRange.replaceAll('–', '-').replaceAll(' ', '').split(',');
-    for (final part in parts) {
-      if (part.contains('-')) {
-        final range = part.split('-');
-        if (range.length != 2) continue;
-        final a = int.tryParse(range[0]);
-        final b = int.tryParse(range[1]);
-        if (a == null || b == null) continue;
-        final low = a < b ? a : b;
-        final high = a > b ? a : b;
-        if (number >= low && number <= high) return true;
-      } else {
-        if (int.tryParse(part) == number) return true;
-      }
-    }
-    return false;
-  }
-
   Map<String, dynamic> toJson() => {
         'eventName': eventName,
         'game': game,
@@ -2302,8 +2205,6 @@ class TimerStateModel {
         'roundLengthMinutes': roundLengthMinutes,
         'currentRound': currentRound,
         'totalRounds': totalRounds,
-        'tableRange': tableRange,
-        'tableCount': tableCount,
         'useCustomLogo': useCustomLogo,
         'eventFinished': eventFinished,
         'firstPlace': firstPlace,
@@ -2328,8 +2229,6 @@ class TimerStateModel {
     int? roundLengthMinutes,
     int? currentRound,
     int? totalRounds,
-    String? tableRange,
-    int? tableCount,
     bool? useCustomLogo,
     bool? eventFinished,
     String? firstPlace,
@@ -2353,8 +2252,6 @@ class TimerStateModel {
       roundLengthMinutes: roundLengthMinutes ?? this.roundLengthMinutes,
       currentRound: currentRound ?? this.currentRound,
       totalRounds: totalRounds ?? this.totalRounds,
-      tableRange: tableRange ?? this.tableRange,
-      tableCount: tableCount ?? this.tableCount,
       useCustomLogo: useCustomLogo ?? this.useCustomLogo,
       eventFinished: eventFinished ?? this.eventFinished,
       firstPlace: firstPlace ?? this.firstPlace,
@@ -2391,8 +2288,7 @@ class EventPreset {
     this.game,
     this.matchFormat,
     this.roundLengthMinutes,
-    this.rounds,
-    this.tables, {
+    this.rounds, {
     String? id,
     this.timeCalledNote = '',
   }) : id = id ?? newPresetId();
@@ -2404,7 +2300,6 @@ class EventPreset {
       normalizeMatchFormat(json['matchFormat'] as String? ?? 'BO1'),
       (json['roundLengthMinutes'] as num?)?.toInt() ?? 50,
       (json['rounds'] as num?)?.toInt() ?? 4,
-      json['tables'] as String? ?? '1-12',
       // Presets saved before ids existed get a fresh one on load.
       id: json['id'] as String?,
       timeCalledNote: json['timeCalledNote'] as String? ?? '',
@@ -2419,7 +2314,6 @@ class EventPreset {
         'BO1',
         50,
         4,
-        '1-12',
         id: 'default-lorcana-weekly',
       ),
       EventPreset(
@@ -2428,7 +2322,6 @@ class EventPreset {
         'BO1',
         30,
         3,
-        '13-20',
         id: 'default-pokemon-casual',
       ),
       EventPreset(
@@ -2437,7 +2330,6 @@ class EventPreset {
         'BO3',
         60,
         1,
-        '1-8',
         id: 'default-commander-night',
       ),
     ];
@@ -2463,7 +2355,6 @@ class EventPreset {
   final String matchFormat;
   final int roundLengthMinutes;
   final int rounds;
-  final String tables;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -2473,7 +2364,6 @@ class EventPreset {
         'matchFormat': matchFormat,
         'roundLengthMinutes': roundLengthMinutes,
         'rounds': rounds,
-        'tables': tables,
       };
 }
 
