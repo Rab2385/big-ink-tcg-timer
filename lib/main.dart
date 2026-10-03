@@ -5,11 +5,27 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_application_ft_event_timer/display_bridge.dart';
+import 'package:flutter_application_ft_event_timer/live_page.dart';
+import 'package:flutter_application_ft_event_timer/setup_page.dart';
+import 'package:flutter_application_ft_event_timer/sound.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const storageKey = 'big_ink_tcg_timer_v1';
 const presetsStorageKey = 'big_ink_tcg_timer_presets_v1';
+const displayStorageKey = 'big_ink_tcg_timer_display_v1';
+const messagesStorageKey = 'big_ink_tcg_timer_messages_v1';
+const syncChannelName = 'big-ink-tcg-timer';
 const appVersion = 'V1.2.3 Alena';
+
+/// The player screen window is opened with `?view=player`. Flutter rewrites
+/// the `#...` part of the URL on start, so a query parameter survives a
+/// reload; `#player` is still accepted for older links and shortcuts.
+const playerViewQuery = 'view=player';
+
+bool isPlayerWindowUrl(Uri url) =>
+    url.queryParameters['view'] == 'player' ||
+    url.fragment.toLowerCase().contains('player');
 
 void main() => runApp(const BigInkTimerApp());
 
@@ -17,16 +33,27 @@ class BigInkTimerApp extends StatefulWidget {
   const BigInkTimerApp({super.key});
 
   @override
-  State<BigInkTimerApp> createState() => _BigInkTimerAppState();
+  State<BigInkTimerApp> createState() => BigInkTimerAppState();
 }
 
-class _BigInkTimerAppState extends State<BigInkTimerApp> {
+/// Navigation rail order.
+abstract final class AppPage {
+  static const live = 0;
+  static const setup = 1;
+  static const presets = 2;
+  static const tables = 3;
+}
+
+/// Holds the event state and every action the pages can trigger. Pages get
+/// this object and call its methods directly.
+class BigInkTimerAppState extends State<BigInkTimerApp> {
   TimerStateModel state = TimerStateModel.defaults();
   List<EventPreset> presets = EventPreset.defaultPresets();
   SharedPreferences? prefs;
   Timer? ticker;
   StreamSubscription<html.Event>? fullscreenSubscription;
-  final FocusNode keyboardFocusNode = FocusNode();
+  StreamSubscription<html.MessageEvent>? syncSubscription;
+  html.BroadcastChannel? syncChannel;
 
   // The app state sits above MaterialApp, so its own context has no
   // Navigator or ScaffoldMessenger. Dialogs and snack bars go through these.
@@ -36,8 +63,28 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
   // Text fields are saved automatically shortly after typing stops.
   Timer? autosaveTimer;
 
-  int page = 0;
+  int page = AppPage.live;
+
+  /// Fallback without a second screen: the player screen fills this window.
+  bool fullscreenPlayer = false;
+
+  /// True in the window that only shows the player screen (`#player`).
   late final bool playerOnly;
+
+  late final DisplayBridge display = DisplayBridge(onChanged: refreshDisplay);
+  DisplayStatus displayStatus = const DisplayStatus();
+
+  /// The screen the player window was last opened on, and whether it should
+  /// be open. Used to reopen it on start and to report a lost connection.
+  int? rememberedScreenId;
+  bool wantPlayerOpen = false;
+
+  final wakeLock = ScreenWakeLock();
+  final sound = SoundPlayer();
+  int _lastTickRemaining = -1;
+  int _tickCount = 0;
+
+  List<String> recentMessages = [];
 
   final eventName = TextEditingController();
   final roundLength = TextEditingController();
@@ -45,71 +92,54 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
   final totalRounds = TextEditingController();
   final tableRange = TextEditingController();
   final tableCount = TextEditingController();
-  final firstPlace = TextEditingController();
-  final secondPlace = TextEditingController();
-  final thirdPlace = TextEditingController();
+  final timeCalledNote = TextEditingController();
+  final messageInput = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    playerOnly = Uri.base.fragment.toLowerCase().contains('player');
+    playerOnly = isPlayerWindowUrl(Uri.base);
     _syncTextFields();
     _load();
 
+    syncChannel = html.BroadcastChannel(syncChannelName);
+    syncSubscription = syncChannel!.onMessage.listen(_onSyncMessage);
+
+    if (playerOnly) {
+      // Ask the control window for the current state right away.
+      _post({'type': 'hello'});
+      wakeLock.keepOn();
+    } else {
+      display.start();
+      HardwareKeyboard.instance.addHandler(_handleKey);
+    }
+
     fullscreenSubscription = html.document.onFullscreenChange.listen((_) {
-      if (!playerOnly && page == 1 && html.document.fullscreenElement == null) {
-        setState(() => page = 0);
+      if (fullscreenPlayer && html.document.fullscreenElement == null) {
+        setState(() => fullscreenPlayer = false);
+        wakeLock.release();
       }
     });
 
     // A sub-second tick keeps the display within 250 ms of each second
     // boundary, so the countdown never visibly skips a second.
     ticker = Timer.periodic(const Duration(milliseconds: 250), (_) async {
-      if (playerOnly) await _reloadForPlayerScreen();
-
-      // Only the control window writes state. The player window just reads,
-      // so it can never overwrite a change made by the admin.
-      if (!playerOnly && state.running && state.remainingNow <= 0) {
-        await _setStateModel(
-          state.withTimer(running: false, remainingSeconds: 0),
-        );
+      _tickCount++;
+      if (playerOnly) {
+        // Updates arrive over the sync channel. Re-reading the saved state
+        // every few seconds is only a safety net.
+        if (_tickCount % 12 == 0) await _reloadForPlayerScreen();
+      } else {
+        _playSounds();
+        // Only the control window writes state. The player window just
+        // reads, so it can never overwrite a change made by the admin.
+        if (state.running && state.remainingNow <= 0) {
+          await _setStateModel(state.withTimeCalled());
+        }
       }
 
       if (mounted) setState(() {});
     });
-  }
-
-  void openPlayerScreenFullscreen() {
-    setState(() => page = 1);
-
-    // This works for Flutter Web in Chrome/Edge.
-    // Browsers allow fullscreen only directly after a user action,
-    // so we call it immediately when the Player Screen navigation item is pressed.
-    html.document.documentElement?.requestFullscreen();
-
-    keyboardFocusNode.requestFocus();
-  }
-
-  Future<void> exitPlayerScreenToSetup() async {
-    if (html.document.fullscreenElement != null) {
-      html.document.exitFullscreen();
-    }
-
-    if (!playerOnly && mounted) {
-      setState(() => page = 0);
-    }
-  }
-
-  KeyEventResult handleKeyboard(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.escape) {
-      if (!playerOnly && page == 1) {
-        exitPlayerScreenToSetup();
-        return KeyEventResult.handled;
-      }
-    }
-
-    return KeyEventResult.ignored;
   }
 
   @override
@@ -117,18 +147,29 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     ticker?.cancel();
     autosaveTimer?.cancel();
     fullscreenSubscription?.cancel();
-    keyboardFocusNode.dispose();
-    eventName.dispose();
-    roundLength.dispose();
-    currentRound.dispose();
-    totalRounds.dispose();
-    tableRange.dispose();
-    tableCount.dispose();
-    firstPlace.dispose();
-    secondPlace.dispose();
-    thirdPlace.dispose();
+    syncSubscription?.cancel();
+    syncChannel?.close();
+    display.dispose();
+    wakeLock.dispose();
+    if (!playerOnly) HardwareKeyboard.instance.removeHandler(_handleKey);
+    for (final controller in [
+      eventName,
+      roundLength,
+      currentRound,
+      totalRounds,
+      tableRange,
+      tableCount,
+      timeCalledNote,
+      messageInput,
+    ]) {
+      controller.dispose();
+    }
     super.dispose();
   }
+
+  // ---------------------------------------------------------------------
+  // Loading, saving and syncing
+  // ---------------------------------------------------------------------
 
   Future<void> _load() async {
     prefs = await SharedPreferences.getInstance();
@@ -146,8 +187,11 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     }
 
     await _loadPresets();
+    _loadRecentMessages();
     _syncTextFields();
     if (mounted) setState(() {});
+
+    if (!playerOnly) await _restorePlayerWindow();
   }
 
   Future<void> _loadPresets() async {
@@ -209,7 +253,41 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
   }) async {
     setState(() => state = next.withFreshTimestamp());
     if (syncText) _syncTextFields();
+    _broadcastState();
     await _save();
+  }
+
+  void _post(Map<String, dynamic> message) {
+    try {
+      syncChannel?.postMessage(jsonEncode(message));
+    } catch (_) {
+      // The player window falls back to re-reading saved state.
+    }
+  }
+
+  void _broadcastState() {
+    if (playerOnly) return;
+    _post({'type': 'state', 'state': state.toJson()});
+  }
+
+  void _onSyncMessage(html.MessageEvent event) {
+    final data = event.data;
+    if (data is! String) return;
+
+    try {
+      final message = jsonDecode(data) as Map<String, dynamic>;
+      final type = message['type'];
+      if (type == 'hello' && !playerOnly) {
+        _broadcastState();
+      } else if (type == 'state' && playerOnly) {
+        final next = TimerStateModel.fromJson(
+          message['state'] as Map<String, dynamic>,
+        );
+        if (mounted) setState(() => state = next);
+      }
+    } catch (_) {
+      // Ignore messages from other versions of the app.
+    }
   }
 
   void _syncTextFields() {
@@ -219,9 +297,7 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     totalRounds.text = state.totalRounds.toString();
     tableRange.text = state.tableRange;
     tableCount.text = state.tableCount.toString();
-    firstPlace.text = state.firstPlace;
-    secondPlace.text = state.secondPlace;
-    thirdPlace.text = state.thirdPlace;
+    timeCalledNote.text = state.timeCalledNote;
   }
 
   int _readInt(TextEditingController controller, int fallback) {
@@ -231,10 +307,7 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
   /// Called on every keystroke in the setup fields. Saves once typing pauses.
   void scheduleAutosave() {
     autosaveTimer?.cancel();
-    autosaveTimer = Timer(
-      const Duration(milliseconds: 400),
-      () => applySettings(resetTimer: false),
-    );
+    autosaveTimer = Timer(const Duration(milliseconds: 400), saveFields);
   }
 
   /// Saves pending field edits right away, so actions that re-sync the
@@ -242,41 +315,422 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
   Future<void> flushAutosave() async {
     if (autosaveTimer?.isActive != true) return;
     autosaveTimer!.cancel();
-    await applySettings(resetTimer: false);
+    await saveFields();
   }
 
-  Future<void> applySettings({required bool resetTimer}) async {
+  /// Saves the setup text fields. Never touches a running timer: a new
+  /// round length applies from the next round or a restart.
+  Future<void> saveFields() async {
     autosaveTimer?.cancel();
-    final length =
-        clampInt(_readInt(roundLength, state.roundLengthMinutes), 5, 180);
-
-    // Saving field edits must not touch a running timer; only a reset does.
-    final base = resetTimer
-        ? state.withTimer(running: state.running, remainingSeconds: length * 60)
-        : state;
+    final tables = tableRange.text.trim();
 
     await _setStateModel(
-      base.copyWith(
-            eventName: eventName.text.trim().isEmpty
-                ? 'TCG Event'
-                : eventName.text.trim(),
-            roundLengthMinutes: length,
-            currentRound:
-                clampInt(_readInt(currentRound, state.currentRound), 1, 99),
-            totalRounds:
-                clampInt(_readInt(totalRounds, state.totalRounds), 1, 99),
-            tableRange: tableRange.text.trim().isEmpty
-                ? '1-12'
-                : tableRange.text.trim(),
-            tableCount:
-                clampInt(_readInt(tableCount, state.tableCount), 1, 120),
-            firstPlace: firstPlace.text.trim(),
-            secondPlace: secondPlace.text.trim(),
-            thirdPlace: thirdPlace.text.trim(),
-            eventFinished: resetTimer ? false : state.eventFinished,
-          ),
+      state.copyWith(
+        eventName: eventName.text.trim().isEmpty
+            ? 'TCG Event'
+            : eventName.text.trim(),
+        roundLengthMinutes:
+            clampInt(_readInt(roundLength, state.roundLengthMinutes), 5, 180),
+        currentRound:
+            clampInt(_readInt(currentRound, state.currentRound), 1, 99),
+        totalRounds: clampInt(_readInt(totalRounds, state.totalRounds), 1, 99),
+        tableRange: tables.isEmpty ? state.tableRange : tables,
+        tableCount: clampInt(_readInt(tableCount, state.tableCount), 1, 120),
+        timeCalledNote: timeCalledNote.text.trim(),
+      ),
     );
   }
+
+  // ---------------------------------------------------------------------
+  // Messages and undo
+  // ---------------------------------------------------------------------
+
+  void showMessage(
+    String text, {
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    final messenger = messengerKey.currentState;
+    if (messenger == null) return;
+
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(text),
+          duration: const Duration(seconds: 8),
+          behavior: SnackBarBehavior.floating,
+          width: 520,
+          action: actionLabel == null || onAction == null
+              ? null
+              : SnackBarAction(label: actionLabel, onPressed: onAction),
+        ),
+      );
+  }
+
+  /// Applies [next] right away and offers to undo it for a few seconds,
+  /// instead of asking for confirmation first.
+  Future<void> _commitWithUndo(
+    TimerStateModel next,
+    String message, {
+    bool syncText = false,
+  }) async {
+    final before = state;
+    await _setStateModel(next, syncText: syncText);
+    showMessage(
+      message,
+      actionLabel: 'Undo',
+      onAction: () => _setStateModel(before, syncText: true),
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Timer actions
+  // ---------------------------------------------------------------------
+
+  /// The one big button on the Live page. What it does depends on the
+  /// moment: start/pause, then next round, then finish the event.
+  Future<void> primaryAction() async {
+    if (state.eventFinished) {
+      setState(() => page = AppPage.setup);
+      return;
+    }
+    if (state.timeCalled) {
+      await nextRound();
+      return;
+    }
+    await toggleTimer();
+  }
+
+  String get primaryActionLabel {
+    if (state.eventFinished) return 'Start New Event';
+    if (state.timeCalled) {
+      return state.isFinalRound ? 'Finish Event' : 'Next Round';
+    }
+    return state.running ? 'Pause' : 'Start';
+  }
+
+  Future<void> toggleTimer() async {
+    if (state.eventFinished) return;
+    sound.prime();
+
+    final remaining = state.remainingNow;
+    await _setStateModel(
+      state.withTimer(
+        running: remaining > 0 && !state.running,
+        remainingSeconds: remaining,
+      ),
+    );
+  }
+
+  Future<void> adjustTime(int seconds) async {
+    if (state.eventFinished) return;
+    final next = state.adjustedBy(seconds);
+    final sign = seconds < 0 ? '−' : '+';
+    await _commitWithUndo(
+      next,
+      '$sign${seconds.abs() ~/ 60} min · now ${formatSeconds(next.remainingNow)}',
+    );
+  }
+
+  Future<void> setRemainingTime(int seconds) async {
+    if (state.eventFinished) return;
+    final next = state.withTimer(
+      running: state.running && seconds > 0,
+      remainingSeconds: seconds,
+    );
+    await _commitWithUndo(next, 'Timer set to ${formatSeconds(seconds)}');
+  }
+
+  Future<void> nextRound() async {
+    if (state.eventFinished) return;
+    await flushAutosave();
+
+    // In the final round, "next" means ending the event.
+    if (state.isFinalRound) {
+      await finishEvent();
+      return;
+    }
+
+    final next = state.currentRound + 1;
+    await _commitWithUndo(
+      state
+          .withTimer(
+            running: false,
+            remainingSeconds: state.roundLengthMinutes * 60,
+          )
+          .copyWith(currentRound: next, displayMode: DisplayMode.timer),
+      'Round $next is ready · ${formatSeconds(state.roundLengthMinutes * 60)}',
+      syncText: true,
+    );
+  }
+
+  Future<void> restartRound() async {
+    await flushAutosave();
+    await _commitWithUndo(
+      state
+          .withTimer(
+            running: false,
+            remainingSeconds: state.roundLengthMinutes * 60,
+          )
+          .copyWith(eventFinished: false, displayMode: DisplayMode.timer),
+      'Round ${state.currentRound} restarted',
+    );
+  }
+
+  /// Asks for the top three, then shows the podium on the player screen.
+  Future<void> finishEvent() async {
+    if (state.eventFinished) return;
+    await flushAutosave();
+    if (!mounted) return;
+
+    final dialogContext = navigatorKey.currentContext;
+    if (dialogContext == null || !dialogContext.mounted) return;
+    final winners = await showFinishEventDialog(dialogContext, state);
+    if (winners == null) return;
+
+    await _commitWithUndo(
+      state.withTimer(running: false, remainingSeconds: 0).copyWith(
+            eventFinished: true,
+            displayMode: DisplayMode.winners,
+            firstPlace: winners[0],
+            secondPlace: winners[1],
+            thirdPlace: winners[2],
+          ),
+      'Event finished · the podium is on the player screen',
+    );
+  }
+
+  /// Keeps the event settings but starts again at round 1.
+  Future<void> startNewEvent() async {
+    autosaveTimer?.cancel();
+    await _commitWithUndo(
+      _freshEvent(state),
+      'New event ready · round 1',
+      syncText: true,
+    );
+  }
+
+  TimerStateModel _freshEvent(TimerStateModel base) {
+    return base
+        .withTimer(
+          running: false,
+          remainingSeconds: base.roundLengthMinutes * 60,
+        )
+        .copyWith(
+          currentRound: 1,
+          eventFinished: false,
+          displayMode: DisplayMode.timer,
+          playerMessage: '',
+          firstPlace: '',
+          secondPlace: '',
+          thirdPlace: '',
+        );
+  }
+
+  // ---------------------------------------------------------------------
+  // Player screen content
+  // ---------------------------------------------------------------------
+
+  Future<void> setDisplayMode(DisplayMode mode) async {
+    await _setStateModel(state.copyWith(displayMode: mode));
+  }
+
+  Future<void> toggleBlackScreen() async {
+    final back = state.eventFinished ? DisplayMode.winners : DisplayMode.timer;
+    await setDisplayMode(
+      state.displayMode == DisplayMode.black ? back : DisplayMode.black,
+    );
+  }
+
+  Future<void> showPlayerMessage([String? text]) async {
+    final message = (text ?? messageInput.text).trim();
+    if (message.isEmpty) return;
+    messageInput.text = message;
+    await _setStateModel(state.copyWith(playerMessage: message));
+    await _rememberMessage(message);
+  }
+
+  Future<void> hidePlayerMessage() async {
+    await _setStateModel(state.copyWith(playerMessage: ''));
+  }
+
+  Future<void> togglePlayerMessage() async {
+    if (state.playerMessage.isNotEmpty) {
+      await hidePlayerMessage();
+    } else {
+      await showPlayerMessage();
+    }
+  }
+
+  void _loadRecentMessages() {
+    recentMessages = prefs?.getStringList(messagesStorageKey) ?? [];
+  }
+
+  Future<void> _rememberMessage(String message) async {
+    final next = [message, ...recentMessages.where((m) => m != message)];
+    setState(() => recentMessages = next.take(5).toList());
+    await prefs?.setStringList(messagesStorageKey, recentMessages);
+  }
+
+  // ---------------------------------------------------------------------
+  // Second screen
+  // ---------------------------------------------------------------------
+
+  Future<void> refreshDisplay() async {
+    final next = await display.status();
+    if (mounted) setState(() => displayStatus = next);
+  }
+
+  Future<void> _restorePlayerWindow() async {
+    final raw = prefs?.getString(displayStorageKey);
+    if (raw != null) {
+      try {
+        final saved = jsonDecode(raw) as Map<String, dynamic>;
+        rememberedScreenId = (saved['screenId'] as num?)?.toInt();
+        wantPlayerOpen = saved['open'] as bool? ?? false;
+      } catch (_) {
+        // Start without a remembered screen.
+      }
+    }
+
+    await refreshDisplay();
+
+    // Reopen the player screen where it was, if that screen is connected.
+    // Browsers block popups without a click, so this is desktop only.
+    if (display.isDesktop &&
+        wantPlayerOpen &&
+        !displayStatus.playerOpen &&
+        displayStatus.screenById(rememberedScreenId) != null) {
+      await openPlayerWindow(screenId: rememberedScreenId);
+    }
+  }
+
+  Future<void> _saveDisplayChoice() async {
+    await prefs?.setString(
+      displayStorageKey,
+      jsonEncode({'screenId': rememberedScreenId, 'open': wantPlayerOpen}),
+    );
+  }
+
+  Future<void> openPlayerWindow({int? screenId}) async {
+    final remembered = displayStatus.screenById(rememberedScreenId) != null
+        ? rememberedScreenId
+        : null;
+    final status = await display.open(screenId: screenId ?? remembered);
+
+    if (status == null) {
+      showMessage(
+        'The browser blocked the player window. Allow pop-ups for this page and try again.',
+      );
+      return;
+    }
+
+    setState(() {
+      displayStatus = status;
+      wantPlayerOpen = status.playerOpen;
+      if (status.playerScreenId != null) {
+        rememberedScreenId = status.playerScreenId;
+      }
+    });
+    await _saveDisplayChoice();
+    _broadcastState();
+  }
+
+  Future<void> closePlayerWindow() async {
+    final status = await display.close();
+    setState(() {
+      displayStatus = status;
+      wantPlayerOpen = false;
+    });
+    await _saveDisplayChoice();
+  }
+
+  /// Fallback without a second screen: show the player screen full screen in
+  /// this window. Esc returns to the control panel.
+  void openPlayerScreenFullscreen() {
+    setState(() => fullscreenPlayer = true);
+    // Browsers allow fullscreen only directly after a user action.
+    html.document.documentElement?.requestFullscreen();
+    wakeLock.keepOn();
+  }
+
+  void exitPlayerScreenFullscreen() {
+    if (html.document.fullscreenElement != null) {
+      html.document.exitFullscreen();
+    }
+    wakeLock.release();
+    if (mounted) setState(() => fullscreenPlayer = false);
+  }
+
+  // ---------------------------------------------------------------------
+  // Keyboard shortcuts and sounds
+  // ---------------------------------------------------------------------
+
+  bool get _isTyping {
+    final context = FocusManager.instance.primaryFocus?.context;
+    if (context == null) return false;
+    return context.widget is EditableText ||
+        context.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
+  bool _handleKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape && fullscreenPlayer) {
+      exitPlayerScreenFullscreen();
+      return true;
+    }
+
+    // Leave keys alone while typing, in dialogs, and with modifier keys.
+    final keyboard = HardwareKeyboard.instance;
+    if (_isTyping ||
+        navigatorKey.currentState?.canPop() == true ||
+        keyboard.isControlPressed ||
+        keyboard.isMetaPressed ||
+        keyboard.isAltPressed) {
+      return false;
+    }
+
+    if (key == LogicalKeyboardKey.space) {
+      primaryAction();
+    } else if (key == LogicalKeyboardKey.arrowLeft) {
+      adjustTime(-60);
+    } else if (key == LogicalKeyboardKey.arrowRight) {
+      adjustTime(60);
+    } else if (key == LogicalKeyboardKey.keyN) {
+      nextRound();
+    } else if (key == LogicalKeyboardKey.keyM) {
+      togglePlayerMessage();
+    } else if (key == LogicalKeyboardKey.keyB) {
+      toggleBlackScreen();
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  void _playSounds() {
+    final remaining = state.remainingNow;
+    final previous = _lastTickRemaining;
+    _lastTickRemaining = remaining;
+
+    // Only chime while the clock runs down on its own, not after a manual
+    // jump such as −1 min or loading a preset.
+    if (!state.soundEnabled || previous < 0 || previous - remaining > 2) {
+      return;
+    }
+    if (previous > 300 && remaining <= 300 && remaining > 0) {
+      sound.warning(state.soundVolume);
+    } else if (previous > 0 && remaining == 0 && !state.eventFinished) {
+      sound.timeUp(state.soundVolume);
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Settings
+  // ---------------------------------------------------------------------
 
   Future<void> changeGame(String value) async {
     await _setStateModel(state.copyWith(game: normalizeGame(value)));
@@ -292,194 +746,52 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     await _setStateModel(state.copyWith(useCustomLogo: value));
   }
 
-  Future<void> toggleTimer() async {
-    if (state.eventFinished) return;
-
-    final remaining = state.remainingNow;
+  Future<void> changeSound({bool? enabled, double? volume}) async {
+    sound.prime();
     await _setStateModel(
-      state.withTimer(
-        running: remaining > 0 && !state.running,
-        remainingSeconds: remaining,
-      ),
+      state.copyWith(soundEnabled: enabled, soundVolume: volume),
     );
   }
 
-  Future<void> addFiveMinutes() async {
-    if (state.eventFinished) return;
-    await _setStateModel(state.adjustedBy(300));
+  void testSound() {
+    sound
+      ..prime()
+      ..warning(state.soundVolume);
   }
 
-  Future<void> resetTimer() async {
-    final confirmed = await showConfirmDialog(
-      title: 'Reset timer?',
-      message:
-          'This will stop the timer and reset it to the full round length. The event will no longer be marked as finished.',
-      confirmText: 'Reset Timer',
-      confirmColor: const Color(0xFFFB7185),
-    );
-
-    if (!confirmed) return;
-
-    await _setStateModel(
-      state
-          .withTimer(
-            running: false,
-            remainingSeconds: state.roundLengthMinutes * 60,
-          )
-          .copyWith(eventFinished: false),
-    );
-  }
-
-  Future<bool> showConfirmDialog({
-    required String title,
-    required String message,
-    required String confirmText,
-    Color? confirmColor,
-  }) async {
-    final dialogContext = navigatorKey.currentContext;
-    if (dialogContext == null) return false;
-
-    final result = await showDialog<bool>(
-      context: dialogContext,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: confirmColor == null
-                  ? null
-                  : FilledButton.styleFrom(backgroundColor: confirmColor),
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: Text(confirmText),
-            ),
-          ],
-        );
-      },
-    );
-
-    return result ?? false;
-  }
-
-  Future<void> showInfoDialog({
-    required String title,
-    required String message,
-  }) async {
-    final hostContext = navigatorKey.currentContext;
-    if (hostContext == null) return;
-
-    await showDialog<void>(
-      context: hostContext,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> nextRound() async {
-    if (state.eventFinished) return;
-    await flushAutosave();
-
-    if (state.currentRound >= state.totalRounds) {
-      // Do not finish the event through Next Round anymore.
-      // Finish Event is now the only button that ends the event
-      // and opens the Winner Screen.
-      await showInfoDialog(
-        title: 'Final round reached',
-        message:
-            'This is already the final round. Use the Finish Event button to end the event and show the winner screen.',
-      );
-      return;
-    }
-
-    final next = state.currentRound + 1;
-
-    // Simple direct action: no confirmation dialog here.
-    // This avoids the earlier issue where the confirmation popup could block
-    // the button flow in the browser/Electron build.
-    await _setStateModel(
-      state
-          .withTimer(
-            running: false,
-            remainingSeconds: state.roundLengthMinutes * 60,
-          )
-          .copyWith(currentRound: next, eventFinished: false),
-      syncText: true,
-    );
-  }
-
-  Future<void> finishEventManually() async {
-    if (state.eventFinished) return;
-    await flushAutosave();
-
-    // Save the winner names before ending the event.
-    // The Winner Screen reads these values from TimerStateModel.
-    await _setStateModel(
-      state.withTimer(running: false, remainingSeconds: 0).copyWith(
-            eventFinished: true,
-            firstPlace: firstPlace.text.trim(),
-            secondPlace: secondPlace.text.trim(),
-            thirdPlace: thirdPlace.text.trim(),
-          ),
-      syncText: true,
-    );
-
-    // Automatically switch to the Player Screen.
-    // Because eventFinished is now true, PlayerScreen will show WinnerScreen.
-    if (!playerOnly && mounted) {
-      setState(() => page = 1);
-      keyboardFocusNode.requestFocus();
-    }
-  }
+  // ---------------------------------------------------------------------
+  // Presets
+  // ---------------------------------------------------------------------
 
   Future<void> loadPreset(EventPreset preset) async {
     // The preset replaces the setup fields, so pending edits are dropped.
     autosaveTimer?.cancel();
-    final reset = state.withTimer(
-      running: false,
-      remainingSeconds: preset.roundLengthMinutes * 60,
+    final base = state.copyWith(
+      eventName: preset.name,
+      game: preset.game,
+      matchFormat: preset.matchFormat,
+      roundLengthMinutes: preset.roundLengthMinutes,
+      totalRounds: preset.rounds,
+      tableRange: preset.tables,
+      timeCalledNote: preset.timeCalledNote,
     );
-    await _setStateModel(
-      reset.copyWith(
-        eventName: preset.name,
-        game: preset.game,
-        matchFormat: preset.matchFormat,
-        roundLengthMinutes: preset.roundLengthMinutes,
-        currentRound: 1,
-        totalRounds: preset.rounds,
-        tableRange: preset.tables,
-        eventFinished: false,
-        firstPlace: '',
-        secondPlace: '',
-        thirdPlace: '',
-      ),
+    await _commitWithUndo(
+      _freshEvent(base),
+      'Loaded preset "${preset.name}"',
       syncText: true,
     );
   }
 
   Future<void> saveCurrentSetupAsPreset() async {
+    await flushAutosave();
     final created = EventPreset(
-      eventName.text.trim().isEmpty ? state.eventName : eventName.text.trim(),
+      state.eventName,
       state.game,
       state.matchFormat,
-      clampInt(_readInt(roundLength, state.roundLengthMinutes), 5, 180),
-      clampInt(_readInt(totalRounds, state.totalRounds), 1, 99),
-      tableRange.text.trim().isEmpty
-          ? state.tableRange
-          : tableRange.text.trim(),
+      state.roundLengthMinutes,
+      state.totalRounds,
+      state.tableRange,
+      timeCalledNote: state.timeCalledNote,
     );
 
     await _setPresets([...presets, created]);
@@ -533,26 +845,8 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     );
   }
 
-  void showMessage(
-    String text, {
-    String? actionLabel,
-    VoidCallback? onAction,
-  }) {
-    final messenger = messengerKey.currentState;
-    if (messenger == null) return;
-
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(text),
-          duration: const Duration(seconds: 8),
-          behavior: SnackBarBehavior.floating,
-          action: actionLabel == null || onAction == null
-              ? null
-              : SnackBarAction(label: actionLabel, onPressed: onAction),
-        ),
-      );
+  void goTo(int target) {
+    setState(() => page = target);
   }
 
   @override
@@ -569,450 +863,81 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
       navigatorKey: navigatorKey,
       scaffoldMessengerKey: messengerKey,
       debugShowCheckedModeBanner: false,
-      title: 'Big Ink TCG Timer',
+      title: playerOnly ? 'Big Ink TCG Timer – Player Screen' : 'Big Ink TCG Timer',
       theme: theme,
+      // The player window is opened with #player in the URL. Without this,
+      // Flutter would try to treat that as a route name.
+      initialRoute: '/',
+      // The player screen needs a Material ancestor for its round chips.
       home: playerOnly
-          ? PlayerScreen(state: state)
-          : Scaffold(
-              body: Focus(
-                focusNode: keyboardFocusNode,
-                autofocus: true,
-                onKeyEvent: handleKeyboard,
-                child: SafeArea(
-                  child: Row(
-                    children: [
-                      if (page != 1)
+          ? Scaffold(body: PlayerScreen(state: state))
+          : fullscreenPlayer
+              ? Scaffold(body: PlayerScreen(state: state))
+              : Scaffold(
+                  body: SafeArea(
+                    child: Row(
+                      children: [
                         NavigationRail(
                           selectedIndex: page,
-                          extended: MediaQuery.of(context).size.width > 1050,
-                          onDestinationSelected: (value) {
-                            if (value == 1) {
-                              openPlayerScreenFullscreen();
-                            } else {
-                              setState(() => page = value);
-                            }
+                          extended: MediaQuery.of(context).size.width > 1250,
+                          onDestinationSelected: (value) async {
+                            await flushAutosave();
+                            goTo(value);
                           },
                           backgroundColor: Colors.black.withOpacity(0.25),
                           destinations: const [
                             NavigationRailDestination(
                               icon: Icon(Icons.timer_outlined),
                               selectedIcon: Icon(Icons.timer),
-                              label: Text('Timer'),
+                              label: Text('Live'),
                             ),
                             NavigationRailDestination(
-                              icon: Icon(Icons.tv_outlined),
-                              selectedIcon: Icon(Icons.tv),
-                              label: Text('Player Screen'),
-                            ),
-                            NavigationRailDestination(
-                              icon: Icon(Icons.grid_view_outlined),
-                              selectedIcon: Icon(Icons.grid_view),
-                              label: Text('Tables'),
+                              icon: Icon(Icons.tune_outlined),
+                              selectedIcon: Icon(Icons.tune),
+                              label: Text('Setup'),
                             ),
                             NavigationRailDestination(
                               icon: Icon(Icons.event_outlined),
                               selectedIcon: Icon(Icons.event),
                               label: Text('Presets'),
                             ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.grid_view_outlined),
+                              selectedIcon: Icon(Icons.grid_view),
+                              label: Text('Tables'),
+                            ),
                           ],
                         ),
-                      Expanded(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 200),
-                          child: [
-                            AdminTimerPage(
-                              key: const ValueKey('timer'),
-                              state: state,
-                              eventName: eventName,
-                              roundLength: roundLength,
-                              currentRound: currentRound,
-                              totalRounds: totalRounds,
-                              tableRange: tableRange,
-                              tableCount: tableCount,
-                              firstPlace: firstPlace,
-                              secondPlace: secondPlace,
-                              thirdPlace: thirdPlace,
-                              onApplyReset: () =>
-                                  applySettings(resetTimer: true),
-                              onFieldChanged: scheduleAutosave,
-                              onGameChanged: changeGame,
-                              onMatchFormatChanged: changeMatchFormat,
-                              onUseCustomLogoChanged: changeLogoMode,
-                              onToggle: toggleTimer,
-                              onAddFive: addFiveMinutes,
-                              onReset: resetTimer,
-                              onNextRound: nextRound,
-                              onFinishEvent: finishEventManually,
-                            ),
-                            PlayerScreen(
-                              key: const ValueKey('player'),
-                              state: state,
-                            ),
-                            TablesPage(
-                              key: const ValueKey('tables'),
-                              state: state,
-                            ),
-                            PresetsPage(
-                              key: const ValueKey('presets'),
-                              presets: presets,
-                              onLoadPreset: loadPreset,
-                              onSaveCurrentPreset: saveCurrentSetupAsPreset,
-                              onCreatePreset: createPreset,
-                              onUpdatePreset: updatePreset,
-                              onDeletePreset: deletePreset,
-                              onRestoreDefaults: restoreDefaultPresets,
-                            ),
-                          ][page],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-    );
-  }
-}
-
-class AdminTimerPage extends StatelessWidget {
-  const AdminTimerPage({
-    required this.state,
-    required this.eventName,
-    required this.roundLength,
-    required this.currentRound,
-    required this.totalRounds,
-    required this.tableRange,
-    required this.tableCount,
-    required this.firstPlace,
-    required this.secondPlace,
-    required this.thirdPlace,
-    required this.onApplyReset,
-    required this.onFieldChanged,
-    required this.onGameChanged,
-    required this.onMatchFormatChanged,
-    required this.onUseCustomLogoChanged,
-    required this.onToggle,
-    required this.onAddFive,
-    required this.onReset,
-    required this.onNextRound,
-    required this.onFinishEvent,
-    super.key,
-  });
-
-  final TimerStateModel state;
-  final TextEditingController eventName;
-  final TextEditingController roundLength;
-  final TextEditingController currentRound;
-  final TextEditingController totalRounds;
-  final TextEditingController tableRange;
-  final TextEditingController tableCount;
-  final TextEditingController firstPlace;
-  final TextEditingController secondPlace;
-  final TextEditingController thirdPlace;
-  final Future<void> Function() onApplyReset;
-  final VoidCallback onFieldChanged;
-  final Future<void> Function(String value) onGameChanged;
-  final Future<void> Function(String value) onMatchFormatChanged;
-  final Future<void> Function(bool value) onUseCustomLogoChanged;
-  final Future<void> Function() onToggle;
-  final Future<void> Function() onAddFive;
-  final Future<void> Function() onReset;
-  final Future<void> Function() onNextRound;
-  final Future<void> Function() onFinishEvent;
-
-  @override
-  Widget build(BuildContext context) {
-    return PageScaffold(
-      title: 'Timer Control',
-      subtitle: 'Admin screen for your TCG event · $appVersion',
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide = constraints.maxWidth > 950;
-          return Wrap(
-            spacing: 18,
-            runSpacing: 18,
-            children: [
-              SizedBox(
-                width: wide
-                    ? constraints.maxWidth * 0.57 - 10
-                    : constraints.maxWidth,
-                child: AppCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              state.eventName,
-                              style: const TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w900,
+                        Expanded(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            child: [
+                              LivePage(key: const ValueKey('live'), app: this),
+                              SetupPage(key: const ValueKey('setup'), app: this),
+                              PresetsPage(
+                                key: const ValueKey('presets'),
+                                presets: presets,
+                                onLoadPreset: (preset) async {
+                                  await loadPreset(preset);
+                                  goTo(AppPage.live);
+                                },
+                                onSaveCurrentPreset: saveCurrentSetupAsPreset,
+                                onCreatePreset: createPreset,
+                                onUpdatePreset: updatePreset,
+                                onDeletePreset: deletePreset,
+                                onRestoreDefaults: restoreDefaultPresets,
                               ),
-                            ),
+                              TablesPage(
+                                key: const ValueKey('tables'),
+                                state: state,
+                              ),
+                            ][page],
                           ),
-                          StatusBadge(
-                            text: state.status,
-                            color: state.statusColor,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        state.eventFinished
-                            ? '${state.game} · ${state.matchFormat} · EVENT FINISHED · Tables ${state.tableRange}'
-                            : '${state.game} · ${state.matchFormat} · Round ${state.currentRound}/${state.totalRounds} · Tables ${state.tableRange}',
-                        style: softText,
-                      ),
-                      if (state.isFinalRound && !state.eventFinished) ...[
-                        const SizedBox(height: 10),
-                        const FinalRoundNotice(),
+                        ),
                       ],
-                      if (state.eventFinished) ...[
-                        const SizedBox(height: 10),
-                        const EventFinishedNotice(),
-                      ],
-                      const SizedBox(height: 36),
-                      Center(
-                        child: FittedBox(
-                          child: Text(
-                            state.eventFinished
-                                ? 'DONE'
-                                : formatSeconds(state.remainingNow),
-                            style: TextStyle(
-                              fontSize: 130,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -8,
-                              color: state.timerColor,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 26),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        children: [
-                          FilledButton.icon(
-                            onPressed: onToggle,
-                            icon: Icon(
-                              state.running ? Icons.pause : Icons.play_arrow,
-                            ),
-                            label: Text(state.running ? 'Pause' : 'Start'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: onAddFive,
-                            icon: const Icon(Icons.add),
-                            label: const Text('+5 Min'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: onNextRound,
-                            icon: const Icon(Icons.skip_next),
-                            label: const Text('Next Round'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: onFinishEvent,
-                            icon: const Icon(Icons.emoji_events_outlined),
-                            label: const Text('Finish Event'),
-                          ),
-                        ],
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-              SizedBox(
-                width: wide
-                    ? constraints.maxWidth * 0.43 - 10
-                    : constraints.maxWidth,
-                child: AppCard(
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: eventName,
-                        onChanged: (_) => onFieldChanged(),
-                        decoration:
-                            const InputDecoration(labelText: 'Event name'),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        value: normalizeGame(state.game),
-                        decoration: const InputDecoration(labelText: 'Game'),
-                        items: gameOptions
-                            .map(
-                              (game) => DropdownMenuItem(
-                                value: game,
-                                child: Text(game),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) onGameChanged(value);
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        value: normalizeMatchFormat(state.matchFormat),
-                        decoration:
-                            const InputDecoration(labelText: 'Match format'),
-                        items: matchFormatOptions
-                            .map(
-                              (format) => DropdownMenuItem(
-                                value: format,
-                                child: Text(format),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) onMatchFormatChanged(value);
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: roundLength,
-                        onChanged: (_) => onFieldChanged(),
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Round length in minutes',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: currentRound,
-                              onChanged: (_) => onFieldChanged(),
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Current round',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: totalRounds,
-                              onChanged: (_) => onFieldChanged(),
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Total rounds',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: tableRange,
-                        onChanged: (_) => onFieldChanged(),
-                        decoration: const InputDecoration(
-                          labelText: 'Tables used',
-                          hintText: '1-12 or 1-6,9-12',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: tableCount,
-                        onChanged: (_) => onFieldChanged(),
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Total tables in store',
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text(
-                          'Use custom logo PNG',
-                          style: TextStyle(fontWeight: FontWeight.w900),
-                        ),
-                        subtitle: const Text(
-                          'Off = BI logo. On = Big Ink logo.',
-                          style: softText,
-                        ),
-                        value: state.useCustomLogo,
-                        onChanged: onUseCustomLogoChanged,
-                      ),
-                      const SizedBox(height: 18),
-                      const Divider(),
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Winner Screen',
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Enter the top 3 players manually. They will be displayed after the event is finished.',
-                        style: softText,
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: firstPlace,
-                        onChanged: (_) => onFieldChanged(),
-                        decoration: const InputDecoration(
-                          labelText: '1st place',
-                          prefixIcon: Icon(Icons.looks_one_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: secondPlace,
-                        onChanged: (_) => onFieldChanged(),
-                        decoration: const InputDecoration(
-                          labelText: '2nd place',
-                          prefixIcon: Icon(Icons.looks_two_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: thirdPlace,
-                        onChanged: (_) => onFieldChanged(),
-                        decoration: const InputDecoration(
-                          labelText: '3rd place',
-                          prefixIcon: Icon(Icons.looks_3_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      const Row(
-                        children: [
-                          Icon(
-                            Icons.cloud_done_outlined,
-                            size: 18,
-                            color: Color(0xFF4ADE80),
-                          ),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Changes are saved automatically. The running timer is not affected.',
-                              style: softText,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: onApplyReset,
-                          icon: const Icon(Icons.restart_alt),
-                          label: const Text('Reset Timer to Round Length'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
     );
   }
 }
@@ -1026,7 +951,10 @@ class PlayerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final remaining = state.remainingNow;
 
-    if (state.eventFinished) {
+    if (state.displayMode == DisplayMode.black) {
+      return const ColoredBox(color: Colors.black, child: SizedBox.expand());
+    }
+    if (state.eventFinished || state.displayMode == DisplayMode.winners) {
       return WinnerScreen(state: state);
     }
 
@@ -1060,6 +988,7 @@ class PlayerScreen extends StatelessWidget {
 
         final statusTextSize = compact ? 22.0 : 34.0 * scale;
         final instructionTextSize = compact ? 18.0 : 28.0 * scale;
+        final hasMessage = state.playerMessage.isNotEmpty;
 
         return DecoratedBox(
           decoration: BoxDecoration(
@@ -1169,38 +1098,85 @@ class PlayerScreen extends StatelessWidget {
                               ],
                             ),
                             SizedBox(height: 26 * scale),
-                            Text(
-                              remaining <= 0
-                                  ? 'TIME CALLED'
-                                  : formatSeconds(remaining),
-                              style: TextStyle(
-                                fontSize: timerSize,
-                                height: 0.82,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing:
-                                    remaining <= 0 ? -7 * scale : -14 * scale,
-                                color: state.timerColor,
+                            Opacity(
+                              opacity: !state.running && remaining > 0
+                                  ? 0.55
+                                  : 1,
+                              child: Text(
+                                remaining <= 0
+                                    ? 'TIME CALLED'
+                                    : formatSeconds(remaining),
+                                style: TextStyle(
+                                  fontSize: timerSize,
+                                  height: 0.82,
+                                  fontWeight: FontWeight.w900,
+                                  // Equal-width digits keep the time from
+                                  // shifting sideways as it counts down.
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                  letterSpacing:
+                                      remaining <= 0 ? -7 * scale : -8 * scale,
+                                  color: state.timerColor,
+                                ),
                               ),
                             ),
                             SizedBox(height: 18 * scale),
                             Text(
                               remaining <= 0
                                   ? 'Please finish your current turn'
-                                  : state.isFinalRound
-                                      ? 'Final round in progress'
-                                      : remaining <= 300
-                                          ? 'Final five minutes'
-                                          : 'Round in progress',
+                                  : !state.running
+                                      ? 'Paused'
+                                      : state.isFinalRound
+                                          ? 'Final round in progress'
+                                          : remaining <= 300
+                                              ? 'Final five minutes'
+                                              : 'Round in progress',
                               style: TextStyle(
                                 fontSize: statusTextSize,
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
+                            if (remaining <= 0 &&
+                                state.timeCalledNote.isNotEmpty) ...[
+                              SizedBox(height: 8 * scale),
+                              Text(
+                                state.timeCalledNote,
+                                style: TextStyle(
+                                  fontSize: statusTextSize * 0.8,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFFFACC15),
+                                ),
+                              ),
+                            ],
+                            if (remaining <= 0 && state.calledAtMillis > 0) ...[
+                              SizedBox(height: 8 * scale),
+                              Text(
+                                'Overtime +${formatSeconds(state.overtimeSeconds)}',
+                                style: softText.copyWith(
+                                  fontSize: statusTextSize * 0.7,
+                                  fontWeight: FontWeight.w700,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
                     ),
                   ),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8 * scale),
+                    child: LinearProgressIndicator(
+                      value: state.progress,
+                      minHeight: compact ? 6 : 10 * scale,
+                      color: state.timerColor,
+                      backgroundColor: Colors.white.withOpacity(0.1),
+                    ),
+                  ),
+                  SizedBox(height: 14 * scale),
                   Container(
                     width: double.infinity,
                     padding: EdgeInsets.symmetric(
@@ -1209,14 +1185,24 @@ class PlayerScreen extends StatelessWidget {
                     ),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(24 * scale),
-                      color: Colors.black.withOpacity(0.18),
+                      color: hasMessage
+                          ? const Color(0xFFFACC15).withOpacity(0.18)
+                          : Colors.black.withOpacity(0.18),
+                      border: hasMessage
+                          ? Border.all(
+                              color: const Color(0xFFFACC15).withOpacity(0.6),
+                              width: 2,
+                            )
+                          : null,
                     ),
                     child: Text(
-                      remaining <= 0
-                          ? 'Time has been called. Finish the current turn according to event rules, then report your result.'
-                          : state.isFinalRound
-                              ? 'Final round — good luck, have fun, and report your final result after the round.'
-                              : 'Good luck, have fun — please report your result after the round.',
+                      hasMessage
+                          ? state.playerMessage
+                          : remaining <= 0
+                              ? 'Time has been called. Finish the current turn according to event rules, then report your result.'
+                              : state.isFinalRound
+                                  ? 'Final round — good luck, have fun, and report your final result after the round.'
+                                  : 'Good luck, have fun — please report your result after the round.',
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -1232,64 +1218,6 @@ class PlayerScreen extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class FinalRoundNotice extends StatelessWidget {
-  const FinalRoundNotice({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: const Color(0xFFFACC15).withOpacity(0.12),
-        border: Border.all(color: const Color(0xFFFACC15).withOpacity(0.42)),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.warning_amber_rounded, color: Color(0xFFFACC15)),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Final Round — use the Finish Event button when you are ready to show the winner screen.',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class EventFinishedNotice extends StatelessWidget {
-  const EventFinishedNotice({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: const Color(0xFF5FB3FF).withOpacity(0.12),
-        border: Border.all(color: const Color(0xFF5FB3FF).withOpacity(0.42)),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.emoji_events_outlined, color: Color(0xFF5FB3FF)),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Event Finished — the Player Screen now shows the winner podium.',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -1413,46 +1341,44 @@ class WinnerScreen extends StatelessWidget {
                               spacing: 22 * scale,
                               runSpacing: 18 * scale,
                               children: [
-                                PodiumCard(
-                                  placeLabel: '2nd Place',
-                                  name: secondName.isEmpty
-                                      ? 'Winner name'
-                                      : secondName,
-                                  isPlaceholder: secondName.isEmpty,
-                                  icon: Icons.looks_two,
-                                  width: compact ? 230 : 282 * scale,
-                                  height: compact ? 150 : 220 * scale,
-                                  nameSize: podiumNameSize,
-                                  placeSize: podiumPlaceSize,
-                                  accent: const Color(0xFFC0C7D2),
-                                ),
-                                PodiumCard(
-                                  placeLabel: '1st Place',
-                                  name: firstName.isEmpty
-                                      ? 'Winner name'
-                                      : firstName,
-                                  isPlaceholder: firstName.isEmpty,
-                                  icon: Icons.looks_one,
-                                  width: compact ? 245 : 300 * scale,
-                                  height: compact ? 180 : 270 * scale,
-                                  nameSize: podiumNameSize + 7 * scale,
-                                  placeSize: podiumPlaceSize,
-                                  accent: const Color(0xFFFACC15),
-                                  isChampion: true,
-                                ),
-                                PodiumCard(
-                                  placeLabel: '3rd Place',
-                                  name: thirdName.isEmpty
-                                      ? 'Winner name'
-                                      : thirdName,
-                                  isPlaceholder: thirdName.isEmpty,
-                                  icon: Icons.looks_3,
-                                  width: compact ? 230 : 282 * scale,
-                                  height: compact ? 150 : 220 * scale,
-                                  nameSize: podiumNameSize,
-                                  placeSize: podiumPlaceSize,
-                                  accent: const Color(0xFFFB923C),
-                                ),
+                                // Places without a name are left out.
+                                if (secondName.isNotEmpty)
+                                  PodiumCard(
+                                    placeLabel: '2nd Place',
+                                    name: secondName,
+                                    isPlaceholder: false,
+                                    icon: Icons.looks_two,
+                                    width: compact ? 230 : 282 * scale,
+                                    height: compact ? 150 : 220 * scale,
+                                    nameSize: podiumNameSize,
+                                    placeSize: podiumPlaceSize,
+                                    accent: const Color(0xFFC0C7D2),
+                                  ),
+                                if (firstName.isNotEmpty)
+                                  PodiumCard(
+                                    placeLabel: '1st Place',
+                                    name: firstName,
+                                    isPlaceholder: false,
+                                    icon: Icons.looks_one,
+                                    width: compact ? 245 : 300 * scale,
+                                    height: compact ? 180 : 270 * scale,
+                                    nameSize: podiumNameSize + 7 * scale,
+                                    placeSize: podiumPlaceSize,
+                                    accent: const Color(0xFFFACC15),
+                                    isChampion: true,
+                                  ),
+                                if (thirdName.isNotEmpty)
+                                  PodiumCard(
+                                    placeLabel: '3rd Place',
+                                    name: thirdName,
+                                    isPlaceholder: false,
+                                    icon: Icons.looks_3,
+                                    width: compact ? 230 : 282 * scale,
+                                    height: compact ? 150 : 220 * scale,
+                                    nameSize: podiumNameSize,
+                                    placeSize: podiumPlaceSize,
+                                    accent: const Color(0xFFFB923C),
+                                  ),
                               ],
                             ),
                           ],
@@ -1667,6 +1593,7 @@ class _PresetsPageState extends State<PresetsPage> {
   final presetRoundLength = TextEditingController(text: '50');
   final presetRounds = TextEditingController(text: '4');
   final presetTables = TextEditingController(text: '1-12');
+  final presetNote = TextEditingController();
 
   String presetGame = 'Disney Lorcana';
   String presetMatchFormat = 'BO1';
@@ -1680,6 +1607,7 @@ class _PresetsPageState extends State<PresetsPage> {
     presetRoundLength.dispose();
     presetRounds.dispose();
     presetTables.dispose();
+    presetNote.dispose();
     super.dispose();
   }
 
@@ -1692,6 +1620,7 @@ class _PresetsPageState extends State<PresetsPage> {
       presetRoundLength.text = '50';
       presetRounds.text = '4';
       presetTables.text = '1-12';
+      presetNote.clear();
     });
   }
 
@@ -1706,6 +1635,7 @@ class _PresetsPageState extends State<PresetsPage> {
       presetRoundLength.text = preset.roundLengthMinutes.toString();
       presetRounds.text = preset.rounds.toString();
       presetTables.text = preset.tables;
+      presetNote.text = preset.timeCalledNote;
     });
   }
 
@@ -1734,6 +1664,7 @@ class _PresetsPageState extends State<PresetsPage> {
       rounds,
       tables,
       id: editingId,
+      timeCalledNote: presetNote.text.trim(),
     );
   }
 
@@ -1872,6 +1803,15 @@ class _PresetsPageState extends State<PresetsPage> {
                             ),
                           ),
                         ),
+                        SizedBox(
+                          width: wide ? fieldWidth * 2 + 12 : fieldWidth,
+                          child: TextField(
+                            controller: presetNote,
+                            decoration: const InputDecoration(
+                              labelText: 'Note shown at TIME (optional)',
+                            ),
+                          ),
+                        ),
                       ],
                     );
                   },
@@ -1952,7 +1892,8 @@ class _PresetsPageState extends State<PresetsPage> {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          '${preset.game} · ${preset.matchFormat}\n${preset.rounds} rounds · ${preset.roundLengthMinutes} min\nTables ${preset.tables}',
+                          '${preset.game} · ${preset.matchFormat}\n${preset.rounds} rounds · ${preset.roundLengthMinutes} min\nTables ${preset.tables}'
+                          '${preset.timeCalledNote.isEmpty ? '' : '\nAt TIME: ${preset.timeCalledNote}'}',
                           style: softText,
                         ),
                         const SizedBox(height: 18),
@@ -2136,6 +2077,12 @@ class TimerStateModel {
     required this.running,
     required this.lastUpdateMillis,
     this.endsAtMillis = 0,
+    this.calledAtMillis = 0,
+    this.displayMode = DisplayMode.timer,
+    this.playerMessage = '',
+    this.timeCalledNote = '',
+    this.soundEnabled = true,
+    this.soundVolume = 0.7,
   });
 
   factory TimerStateModel.defaults() {
@@ -2190,6 +2137,13 @@ class TimerStateModel {
       running: running,
       lastUpdateMillis: lastUpdateMillis,
       endsAtMillis: endsAtMillis,
+      calledAtMillis: (json['calledAtMillis'] as num?)?.toInt() ?? 0,
+      displayMode: DisplayMode.parse(json['displayMode'] as String?),
+      playerMessage: json['playerMessage'] as String? ?? '',
+      timeCalledNote: json['timeCalledNote'] as String? ?? '',
+      soundEnabled: json['soundEnabled'] as bool? ?? true,
+      soundVolume:
+          ((json['soundVolume'] as num?)?.toDouble() ?? 0.7).clamp(0.0, 1.0),
     );
   }
 
@@ -2214,7 +2168,39 @@ class TimerStateModel {
   /// Only meaningful while [running]; paused timers use [remainingSeconds].
   final int endsAtMillis;
 
+  /// When time was called (ms since epoch), or 0. Used for the overtime count.
+  final int calledAtMillis;
+
+  /// What the player screen shows: the timer, the winner podium, or nothing.
+  final DisplayMode displayMode;
+
+  /// Announcement shown at the bottom of the player screen, if not empty.
+  final String playerMessage;
+
+  /// Shown under TIME, e.g. "Finish the turn + 3 turns".
+  final String timeCalledNote;
+
+  final bool soundEnabled;
+  final double soundVolume;
+
   bool get isFinalRound => currentRound >= totalRounds;
+
+  bool get timeCalled => !eventFinished && remainingNow <= 0;
+
+  /// Seconds since time was called, or 0 while the round is still running.
+  int get overtimeSeconds {
+    if (!timeCalled || calledAtMillis <= 0) return 0;
+    final value =
+        (DateTime.now().millisecondsSinceEpoch - calledAtMillis) ~/ 1000;
+    return value < 0 ? 0 : value;
+  }
+
+  /// Share of the round that is left, from 1.0 (full) to 0.0.
+  double get progress {
+    final total = roundLengthMinutes * 60;
+    if (total <= 0) return 0;
+    return (remainingNow / total).clamp(0.0, 1.0);
+  }
 
   int get remainingNow {
     if (eventFinished) return 0;
@@ -2259,7 +2245,17 @@ class TimerStateModel {
       remainingSeconds: safe,
       endsAtMillis:
           running ? DateTime.now().millisecondsSinceEpoch + safe * 1000 : 0,
+      calledAtMillis: 0,
     );
+  }
+
+  /// Stops a timer that ran out and remembers when that happened.
+  TimerStateModel withTimeCalled() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final calledAt =
+        running && endsAtMillis > 0 && endsAtMillis <= now ? endsAtMillis : now;
+    return withTimer(running: false, remainingSeconds: 0)
+        .copyWith(calledAtMillis: calledAt);
   }
 
   /// Adds [seconds] (or removes them, if negative) without losing the
@@ -2316,6 +2312,12 @@ class TimerStateModel {
         'remainingSeconds': remainingNow,
         'running': running && remainingNow > 0 && !eventFinished,
         'endsAtMillis': endsAtMillis,
+        'calledAtMillis': calledAtMillis,
+        'displayMode': displayMode.name,
+        'playerMessage': playerMessage,
+        'timeCalledNote': timeCalledNote,
+        'soundEnabled': soundEnabled,
+        'soundVolume': soundVolume,
         'lastUpdateMillis': DateTime.now().millisecondsSinceEpoch,
       };
 
@@ -2337,6 +2339,12 @@ class TimerStateModel {
     bool? running,
     int? lastUpdateMillis,
     int? endsAtMillis,
+    int? calledAtMillis,
+    DisplayMode? displayMode,
+    String? playerMessage,
+    String? timeCalledNote,
+    bool? soundEnabled,
+    double? soundVolume,
   }) {
     return TimerStateModel(
       eventName: eventName ?? this.eventName,
@@ -2356,8 +2364,25 @@ class TimerStateModel {
       running: running ?? this.running,
       lastUpdateMillis: lastUpdateMillis ?? this.lastUpdateMillis,
       endsAtMillis: endsAtMillis ?? this.endsAtMillis,
+      calledAtMillis: calledAtMillis ?? this.calledAtMillis,
+      displayMode: displayMode ?? this.displayMode,
+      playerMessage: playerMessage ?? this.playerMessage,
+      timeCalledNote: timeCalledNote ?? this.timeCalledNote,
+      soundEnabled: soundEnabled ?? this.soundEnabled,
+      soundVolume: soundVolume ?? this.soundVolume,
     );
   }
+}
+
+enum DisplayMode {
+  timer,
+  winners,
+  black;
+
+  static DisplayMode parse(String? name) => DisplayMode.values.firstWhere(
+        (mode) => mode.name == name,
+        orElse: () => DisplayMode.timer,
+      );
 }
 
 class EventPreset {
@@ -2369,6 +2394,7 @@ class EventPreset {
     this.rounds,
     this.tables, {
     String? id,
+    this.timeCalledNote = '',
   }) : id = id ?? newPresetId();
 
   factory EventPreset.fromJson(Map<String, dynamic> json) {
@@ -2381,6 +2407,7 @@ class EventPreset {
       json['tables'] as String? ?? '1-12',
       // Presets saved before ids existed get a fresh one on load.
       id: json['id'] as String?,
+      timeCalledNote: json['timeCalledNote'] as String? ?? '',
     );
   }
 
@@ -2430,6 +2457,7 @@ class EventPreset {
   }
 
   final String id;
+  final String timeCalledNote;
   final String name;
   final String game;
   final String matchFormat;
@@ -2439,6 +2467,7 @@ class EventPreset {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'timeCalledNote': timeCalledNote,
         'name': name,
         'game': game,
         'matchFormat': matchFormat,

@@ -8,7 +8,8 @@
   "scripts": {
     "start": "electron .",
     "pack-folder": "electron-builder --win dir",
-    "dist": "electron-builder --win portable"
+    "dist": "electron-builder --win portable",
+    "test:electron": "node --test test/electron/main_display_test.js"
   },
   "build": {
     "productName": "Big Ink TCG Timer",
@@ -19,6 +20,7 @@
     },
     "files": [
       "main.js",
+      "preload.js",
       "build/web/**/*"
     ],
     "win": {

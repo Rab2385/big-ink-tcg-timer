@@ -15,18 +15,22 @@ V1.2.2 Alena
 ## What the app does
 
 The app is designed for running TCG events in a store or club environment.
+The organizer controls the event on the laptop, and the players see the timer
+on a TV or beamer, the second screen.
 
 It includes:
 
-- Admin timer control
-- Fullscreen player screen
-- Round timer
-- Round counter
-- BO1 / BO3 match format display
-- Table range display
-- Final round notice
-- Time called screen
-- Winner screen with 1st / 2nd / 3rd place
+- Live control page with one main button for the next step
+- Player screen on a second monitor, synced live
+- Live preview of the player screen in the control page
+- Round timer with −1 / +1 / +5 minutes, or a typed time
+- Undo for round changes, time changes and deleted presets
+- Keyboard shortcuts
+- Messages to players ("Pairings are up")
+- Black screen and winner podium on demand
+- Overtime counter and an optional note after TIME
+- Optional sound signals at 5 minutes and at TIME
+- Event setup in three steps, with clickable table selection
 - Editable event presets
 - Custom logo toggle
 - Table overview
@@ -36,47 +40,60 @@ It includes:
 
 ## Main screens
 
-### Timer Control
+### Live
 
-The admin screen is used to control the event.
+The Live page is used while the event runs. It shows:
 
-You can set:
+- Round progress (round 3 of 4) and the remaining time
+- When the round ends ("Ends at 19:42"), or the overtime after TIME
+- One big button that does the next thing: Start → Pause → Next Round → Finish Event
+- −1 / +1 / +5 minutes. Click the time to type an exact value, e.g. `12:30`
+- Next Round and Restart Round
+- A live preview of the player screen
+- What the player screen shows: Timer, Winners or Black
+- A message box for announcements on the player screen
 
-- Event name
-- Game
-- Match format: BO1 or BO3
-- Round length
-- Current round
-- Total rounds
-- Table range
-- Total tables
-- Winner names
-- Logo mode
+Round changes, time changes and finishing the event happen right away. A bar
+at the bottom offers **Undo** for 8 seconds.
 
-Timer controls:
+#### Keyboard shortcuts
 
-- Start / Pause
-- +5 minutes
-- Next Round
-- Finish Event
+| Key | Action |
+|---|---|
+| Space | Main button (start / pause, next round, finish) |
+| Left / Right arrow | −1 / +1 minute |
+| N | Next round (finish event in the final round) |
+| M | Show / hide the message to players |
+| B | Black screen on / off |
+| Esc | Leave "Full Screen Here" |
+
+Shortcuts are ignored while typing in a text field.
 
 ---
 
-### Player Screen
+### Player Screen on a second screen
 
-The Player Screen is designed for a TV, beamer, or second monitor.
+Connect the TV or beamer, then press **Show on Screen 2** on the Live page.
 
-It shows:
+- **Desktop app (Electron):** the player screen opens full screen on the
+  second monitor, without a mouse pointer. With more than one extra screen, use
+  **Choose Screen**. The app remembers the screen and reopens it on the next
+  start. If the TV is unplugged, its window closes and the Live page shows
+  "Screen 2 disconnected". The TV does not go to sleep while the player screen
+  is open.
+- **No second screen:** the player screen opens as a normal window that can be
+  dragged to a TV later.
+- **Browser:** the player screen opens as a popup window. Drag it to the TV and
+  press F11. Allow pop-ups for the page if the browser blocks it.
+- **Fallback:** **Full Screen Here** shows the player screen in the control
+  window, as in earlier versions. Esc returns to the Live page.
 
-- Big Ink logo or custom PNG logo
-- Event name
-- Game
-- Tables
-- Round number
-- BO1 / BO3
-- Timer
-- Status text
-- Player instructions
+The player screen window is the same app opened with `?view=player`. It only
+reads the event state and never changes it. Changes reach it immediately.
+
+The player screen shows the logo, event name, game, tables, round, BO1 / BO3,
+the timer with a progress bar, and a status line. A message from the Live page
+replaces the bottom line.
 
 When time reaches zero, it shows:
 
@@ -85,22 +102,31 @@ TIME CALLED
 Please finish your current turn
 ```
 
+plus the optional note (e.g. "Finish the turn, then 3 more turns") and an
+overtime counter.
+
+---
+
+### Setup
+
+Setup has three steps. Every change is saved automatically. A running timer is
+never changed by Setup. A new round length applies from the next round or a
+restart.
+
+1. **Template:** pick a preset to start a new event at round 1, or keep the
+   current settings and start over.
+2. **Details:** event name, game, BO1 / BO3, round length, total rounds,
+   current round, the note shown at TIME, custom logo, and sound signals with
+   volume and a test button.
+3. **Tables:** number of tables in the store, and the tables used. Click tables
+   in the grid, or type a range such as `1-6,9-12`.
+
 ---
 
 ### Winner Screen
 
-When the event is finished, the Player Screen switches to the Winner Screen.
-
-It shows:
-
-- Event finished header
-- Winner podium
-- 1st place
-- 2nd place
-- 3rd place
-- Closing message
-
-Winner names are entered manually in the Timer Control screen.
+In the final round, **Finish Event** asks for the top three. The player screen
+then shows the podium. Places without a name are left out.
 
 ---
 
@@ -132,6 +158,7 @@ A preset stores:
 - Round length
 - Total rounds
 - Tables used
+- Note shown at TIME (optional)
 
 A preset does **not** store:
 
@@ -154,6 +181,8 @@ It stores:
 ```text
 big_ink_tcg_timer_v1          -> current timer/event state
 big_ink_tcg_timer_presets_v1  -> editable presets
+big_ink_tcg_timer_display_v1  -> player screen: last screen, open or not
+big_ink_tcg_timer_messages_v1 -> last 5 messages to players
 ```
 
 This means your current event and presets stay saved after closing/reopening the app on the same machine.
@@ -267,6 +296,12 @@ flutter run -d chrome
 
 ```powershell
 flutter test --platform chrome
+```
+
+The Electron window logic (second screen) has its own tests:
+
+```powershell
+npm.cmd run test:electron
 ```
 
 ---

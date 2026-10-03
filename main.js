@@ -1,4 +1,11 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  powerSaveBlocker,
+  screen,
+} = require('electron');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -8,6 +15,13 @@ const path = require('path');
 const PORT = 18581;
 let server;
 let mainWindow;
+
+// The player screen window (timer for the players), its display, and the
+// power save blocker that keeps that display awake while it is open.
+let playerWindow = null;
+let playerDisplayId = null;
+let playerWindowed = false;
+let sleepBlockerId = null;
 
 // A second launch would try to bind the same port. Hand off to the running
 // instance instead and bring its window to the front.
@@ -86,6 +100,137 @@ function startLocalServer() {
   });
 }
 
+function screenList() {
+  const primaryId = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((display, index) => ({
+    id: display.id,
+    label: display.label || `Screen ${index + 1}`,
+    width: display.size.width,
+    height: display.size.height,
+    primary: display.id === primaryId,
+  }));
+}
+
+// Sent to the control window as JSON (see lib/display_bridge.dart).
+function displayStatus() {
+  return JSON.stringify({
+    screens: screenList(),
+    playerOpen: playerWindow !== null,
+    playerScreenId: playerDisplayId,
+    windowed: playerWindowed,
+  });
+}
+
+function notifyDisplayChange() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('display:changed');
+  }
+}
+
+function closePlayerWindow() {
+  if (!playerWindow) return;
+  const closing = playerWindow;
+  playerWindow = null;
+  playerDisplayId = null;
+  playerWindowed = false;
+  if (!closing.isDestroyed()) closing.destroy();
+  if (sleepBlockerId !== null) {
+    powerSaveBlocker.stop(sleepBlockerId);
+    sleepBlockerId = null;
+  }
+}
+
+// Opens the player screen full screen on the chosen display, or on the first
+// display that is not the main one. Without a second display it opens as a
+// normal window that can be dragged to a TV later.
+function openPlayerWindow(displayId) {
+  const displays = screen.getAllDisplays();
+  const primaryId = screen.getPrimaryDisplay().id;
+  const chosen =
+    displays.find((display) => display.id === displayId) ||
+    displays.find((display) => display.id !== primaryId) ||
+    null;
+  const windowed = chosen === null;
+
+  if (playerWindow && !windowed && playerDisplayId === chosen.id) {
+    playerWindow.focus();
+    return;
+  }
+  closePlayerWindow();
+
+  const bounds = windowed ? null : chosen.bounds;
+  const win = new BrowserWindow({
+    ...(windowed
+      ? { width: 1280, height: 720 }
+      : {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          frame: false,
+        }),
+    title: 'Big Ink TCG Timer – Player Screen',
+    autoHideMenuBar: true,
+    backgroundColor: '#06101F',
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  playerWindow = win;
+  playerDisplayId = windowed ? null : chosen.id;
+  playerWindowed = windowed;
+  sleepBlockerId = powerSaveBlocker.start('prevent-display-sleep');
+
+  win.once('ready-to-show', () => {
+    win.show();
+    if (!windowed) {
+      // Place the window on the TV first, then go full screen there. Asking
+      // for full screen at creation can land on the main screen on Windows.
+      win.setBounds(bounds);
+      win.setFullScreen(true);
+    }
+  });
+  if (!windowed) {
+    // Nobody uses a mouse on the TV; hide the pointer there.
+    win.webContents.on('did-finish-load', () => {
+      win.webContents.insertCSS('* { cursor: none !important; }');
+    });
+  }
+  win.on('closed', () => {
+    if (playerWindow === win) {
+      closePlayerWindow();
+      notifyDisplayChange();
+    }
+  });
+
+  // Matches playerViewQuery in lib/main.dart.
+  win.loadURL(`http://127.0.0.1:${PORT}/?view=player`);
+}
+
+ipcMain.handle('display:status', () => displayStatus());
+ipcMain.handle('display:open-player', (_event, displayId) => {
+  openPlayerWindow(typeof displayId === 'number' ? displayId : null);
+  return displayStatus();
+});
+ipcMain.handle('display:close-player', () => {
+  closePlayerWindow();
+  return displayStatus();
+});
+
+function watchDisplays() {
+  screen.on('display-added', notifyDisplayChange);
+  screen.on('display-metrics-changed', notifyDisplayChange);
+  screen.on('display-removed', (_event, removed) => {
+    // The TV was unplugged: close its window instead of letting Windows
+    // move it on top of the control panel.
+    if (removed.id === playerDisplayId) closePlayerWindow();
+    notifyDisplayChange();
+  });
+}
+
 async function createWindow() {
   try {
     await startLocalServer();
@@ -109,13 +254,16 @@ async function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
 
   mainWindow = win;
   win.on('closed', () => {
     mainWindow = null;
+    closePlayerWindow();
   });
+  watchDisplays();
 
   win.loadURL(`http://127.0.0.1:${PORT}`);
 }

@@ -92,6 +92,10 @@ void main() {
     testWidgets('timer page renders with an unknown saved game', (tester) async {
       final json = pausedAt(60).toJson()..['game'] = 'Flesh and Blood';
       await pumpApp(tester, saved: {storageKey: jsonEncode(json)});
+      await tester.tap(find.text('Setup'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('2 · Details'));
+      await tester.pump(const Duration(milliseconds: 300));
       expect(tester.takeException(), isNull);
       expect(find.text('Random'), findsWidgets);
       await unmountApp(tester);
@@ -123,18 +127,24 @@ void main() {
   });
 
   group('Control panel (#3, #4, #5, #10, dialogs)', () {
-    testWidgets('typed winner names survive Next Round', (tester) async {
+    testWidgets('typed setup fields survive Next Round', (tester) async {
       await pumpApp(tester);
+      await tester.tap(find.text('Setup'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('2 · Details'));
+      await tester.pump(const Duration(milliseconds: 300));
 
-      await tester.enterText(field('1st place'), 'Mira K.');
-      // Press Next Round before the autosave delay has passed.
+      await tester.enterText(field('Event name'), 'Friday Cup');
+      // Leave the page and press Next Round before the autosave delay.
       await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.text('Live'));
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.text('Next Round'));
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text('Mira K.'), findsOneWidget);
-      expect((await savedState())['firstPlace'], 'Mira K.');
-      expect((await savedState())['currentRound'], 2);
+      final saved = await savedState();
+      expect(saved['eventName'], 'Friday Cup');
+      expect(saved['currentRound'], 2);
       await unmountApp(tester);
     });
 
@@ -145,6 +155,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       final endsAt = (await savedState())['endsAtMillis'];
 
+      await tester.tap(find.text('Setup'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('2 · Details'));
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.enterText(field('Event name'), 'Friday Cup');
       await tester.pump(const Duration(milliseconds: 600));
 
@@ -152,21 +166,6 @@ void main() {
       expect(saved['eventName'], 'Friday Cup');
       expect(saved['running'], isTrue);
       expect(saved['endsAtMillis'], endsAt);
-      await unmountApp(tester);
-    });
-
-    testWidgets('Next Round in the final round shows the info dialog',
-        (tester) async {
-      final json = pausedAt(60).copyWith(currentRound: 6, totalRounds: 6).toJson();
-      await pumpApp(tester, saved: {storageKey: jsonEncode(json)});
-
-      await tester.tap(find.text('Next Round'));
-      await tester.pump(const Duration(milliseconds: 300));
-
-      expect(tester.takeException(), isNull);
-      expect(find.text('Final round reached'), findsOneWidget);
-      await tester.tap(find.text('OK'));
-      await tester.pump(const Duration(milliseconds: 300));
       await unmountApp(tester);
     });
 
@@ -218,8 +217,10 @@ void main() {
       await tester.tap(find.text('Add Default Presets'));
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Commander Night'), findsOneWidget);
-      expect(find.text('All default presets are already in your list.'),
-          findsOneWidget);
+      expect(
+        find.text('All default presets are already in your list.'),
+        findsOneWidget,
+      );
       await unmountApp(tester);
     });
   });
