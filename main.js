@@ -1,10 +1,25 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
+// The port is part of the page origin, and localStorage (saved event and
+// presets) is stored per origin. Changing it would hide existing saved data.
 const PORT = 18581;
 let server;
+let mainWindow;
+
+// A second launch would try to bind the same port. Hand off to the running
+// instance instead and bring its window to the front.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+}
 
 if (app.isPackaged) {
   app.setPath('userData', path.join(path.dirname(process.execPath), 'user_data'));
@@ -46,7 +61,7 @@ function startLocalServer() {
         return;
       }
 
-      if (!fs.existsSync(filePath)) {
+      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
         filePath = path.join(webDir, 'index.html');
       }
 
@@ -62,13 +77,27 @@ function startLocalServer() {
     }
   });
 
-  return new Promise((resolve) => {
-    server.listen(PORT, '127.0.0.1', resolve);
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(PORT, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
   });
 }
 
 async function createWindow() {
-  await startLocalServer();
+  try {
+    await startLocalServer();
+  } catch (error) {
+    const reason =
+      error && error.code === 'EADDRINUSE'
+        ? `Port ${PORT} is already used by another program. Close that program (or restart the computer) and start Big Ink TCG Timer again.`
+        : `The local web server could not start: ${error && error.message ? error.message : error}`;
+    dialog.showErrorBox('Big Ink TCG Timer could not start', reason);
+    app.quit();
+    return;
+  }
 
   const win = new BrowserWindow({
     width: 1400,
@@ -83,10 +112,17 @@ async function createWindow() {
     },
   });
 
+  mainWindow = win;
+  win.on('closed', () => {
+    mainWindow = null;
+  });
+
   win.loadURL(`http://127.0.0.1:${PORT}`);
 }
 
-app.whenReady().then(createWindow);
+if (app.hasSingleInstanceLock()) {
+  app.whenReady().then(createWindow);
+}
 
 app.on('window-all-closed', () => {
   if (server) server.close();

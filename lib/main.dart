@@ -28,6 +28,14 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
   StreamSubscription<html.Event>? fullscreenSubscription;
   final FocusNode keyboardFocusNode = FocusNode();
 
+  // The app state sits above MaterialApp, so its own context has no
+  // Navigator or ScaffoldMessenger. Dialogs and snack bars go through these.
+  final navigatorKey = GlobalKey<NavigatorState>();
+  final messengerKey = GlobalKey<ScaffoldMessengerState>();
+
+  // Text fields are saved automatically shortly after typing stops.
+  Timer? autosaveTimer;
+
   int page = 0;
   late final bool playerOnly;
 
@@ -54,12 +62,16 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
       }
     });
 
-    ticker = Timer.periodic(const Duration(seconds: 1), (_) async {
+    // A sub-second tick keeps the display within 250 ms of each second
+    // boundary, so the countdown never visibly skips a second.
+    ticker = Timer.periodic(const Duration(milliseconds: 250), (_) async {
       if (playerOnly) await _reloadForPlayerScreen();
 
-      if (state.running && state.remainingNow <= 0) {
+      // Only the control window writes state. The player window just reads,
+      // so it can never overwrite a change made by the admin.
+      if (!playerOnly && state.running && state.remainingNow <= 0) {
         await _setStateModel(
-          state.snapshot().copyWith(running: false, remainingSeconds: 0),
+          state.withTimer(running: false, remainingSeconds: 0),
         );
       }
 
@@ -103,6 +115,7 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
   @override
   void dispose() {
     ticker?.cancel();
+    autosaveTimer?.cancel();
     fullscreenSubscription?.cancel();
     keyboardFocusNode.dispose();
     eventName.dispose();
@@ -172,11 +185,13 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
   }
 
   Future<void> _save() async {
+    if (playerOnly) return;
     prefs ??= await SharedPreferences.getInstance();
     await prefs!.setString(storageKey, jsonEncode(state.toJson()));
   }
 
   Future<void> _savePresets() async {
+    if (playerOnly) return;
     prefs ??= await SharedPreferences.getInstance();
     final encoded =
         jsonEncode(presets.map((preset) => preset.toJson()).toList());
@@ -213,13 +228,35 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     return int.tryParse(controller.text.trim()) ?? fallback;
   }
 
+  /// Called on every keystroke in the setup fields. Saves once typing pauses.
+  void scheduleAutosave() {
+    autosaveTimer?.cancel();
+    autosaveTimer = Timer(
+      const Duration(milliseconds: 400),
+      () => applySettings(resetTimer: false),
+    );
+  }
+
+  /// Saves pending field edits right away, so actions that re-sync the
+  /// text fields from the saved state never discard what was just typed.
+  Future<void> flushAutosave() async {
+    if (autosaveTimer?.isActive != true) return;
+    autosaveTimer!.cancel();
+    await applySettings(resetTimer: false);
+  }
+
   Future<void> applySettings({required bool resetTimer}) async {
+    autosaveTimer?.cancel();
     final length =
         clampInt(_readInt(roundLength, state.roundLengthMinutes), 5, 180);
-    final nowRemaining = resetTimer ? length * 60 : state.remainingNow;
+
+    // Saving field edits must not touch a running timer; only a reset does.
+    final base = resetTimer
+        ? state.withTimer(running: state.running, remainingSeconds: length * 60)
+        : state;
 
     await _setStateModel(
-      state.snapshot().copyWith(
+      base.copyWith(
             eventName: eventName.text.trim().isEmpty
                 ? 'TCG Event'
                 : eventName.text.trim(),
@@ -237,41 +274,39 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
             secondPlace: secondPlace.text.trim(),
             thirdPlace: thirdPlace.text.trim(),
             eventFinished: resetTimer ? false : state.eventFinished,
-            remainingSeconds: nowRemaining,
           ),
     );
   }
 
   Future<void> changeGame(String value) async {
-    await _setStateModel(state.snapshot().copyWith(game: value));
+    await _setStateModel(state.copyWith(game: normalizeGame(value)));
   }
 
   Future<void> changeMatchFormat(String value) async {
     await _setStateModel(
-      state.snapshot().copyWith(matchFormat: normalizeMatchFormat(value)),
+      state.copyWith(matchFormat: normalizeMatchFormat(value)),
     );
   }
 
   Future<void> changeLogoMode(bool value) async {
-    await _setStateModel(state.snapshot().copyWith(useCustomLogo: value));
+    await _setStateModel(state.copyWith(useCustomLogo: value));
   }
 
   Future<void> toggleTimer() async {
     if (state.eventFinished) return;
 
-    final snap = state.snapshot();
+    final remaining = state.remainingNow;
     await _setStateModel(
-      snap.copyWith(
-        running: snap.remainingSeconds > 0 ? !snap.running : false,
+      state.withTimer(
+        running: remaining > 0 && !state.running,
+        remainingSeconds: remaining,
       ),
     );
   }
 
   Future<void> addFiveMinutes() async {
-    final snap = state.snapshot();
-    await _setStateModel(
-      snap.copyWith(remainingSeconds: snap.remainingSeconds + 300),
-    );
+    if (state.eventFinished) return;
+    await _setStateModel(state.adjustedBy(300));
   }
 
   Future<void> resetTimer() async {
@@ -286,11 +321,12 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     if (!confirmed) return;
 
     await _setStateModel(
-      state.copyWith(
-        running: false,
-        eventFinished: false,
-        remainingSeconds: state.roundLengthMinutes * 60,
-      ),
+      state
+          .withTimer(
+            running: false,
+            remainingSeconds: state.roundLengthMinutes * 60,
+          )
+          .copyWith(eventFinished: false),
     );
   }
 
@@ -300,8 +336,11 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     required String confirmText,
     Color? confirmColor,
   }) async {
+    final dialogContext = navigatorKey.currentContext;
+    if (dialogContext == null) return false;
+
     final result = await showDialog<bool>(
-      context: context,
+      context: dialogContext,
       builder: (dialogContext) {
         return AlertDialog(
           title: Text(title),
@@ -330,8 +369,11 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     required String title,
     required String message,
   }) async {
+    final hostContext = navigatorKey.currentContext;
+    if (hostContext == null) return;
+
     await showDialog<void>(
-      context: context,
+      context: hostContext,
       builder: (dialogContext) {
         return AlertDialog(
           title: Text(title),
@@ -349,6 +391,7 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
 
   Future<void> nextRound() async {
     if (state.eventFinished) return;
+    await flushAutosave();
 
     if (state.currentRound >= state.totalRounds) {
       // Do not finish the event through Next Round anymore.
@@ -368,26 +411,25 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     // This avoids the earlier issue where the confirmation popup could block
     // the button flow in the browser/Electron build.
     await _setStateModel(
-      state.copyWith(
-        currentRound: next,
-        running: false,
-        eventFinished: false,
-        remainingSeconds: state.roundLengthMinutes * 60,
-      ),
+      state
+          .withTimer(
+            running: false,
+            remainingSeconds: state.roundLengthMinutes * 60,
+          )
+          .copyWith(currentRound: next, eventFinished: false),
       syncText: true,
     );
   }
 
   Future<void> finishEventManually() async {
     if (state.eventFinished) return;
+    await flushAutosave();
 
     // Save the winner names before ending the event.
     // The Winner Screen reads these values from TimerStateModel.
     await _setStateModel(
-      state.snapshot().copyWith(
-            running: false,
+      state.withTimer(running: false, remainingSeconds: 0).copyWith(
             eventFinished: true,
-            remainingSeconds: 0,
             firstPlace: firstPlace.text.trim(),
             secondPlace: secondPlace.text.trim(),
             thirdPlace: thirdPlace.text.trim(),
@@ -404,8 +446,14 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
   }
 
   Future<void> loadPreset(EventPreset preset) async {
+    // The preset replaces the setup fields, so pending edits are dropped.
+    autosaveTimer?.cancel();
+    final reset = state.withTimer(
+      running: false,
+      remainingSeconds: preset.roundLengthMinutes * 60,
+    );
     await _setStateModel(
-      state.copyWith(
+      reset.copyWith(
         eventName: preset.name,
         game: preset.game,
         matchFormat: preset.matchFormat,
@@ -417,171 +465,9 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
         firstPlace: '',
         secondPlace: '',
         thirdPlace: '',
-        remainingSeconds: preset.roundLengthMinutes * 60,
-        running: false,
       ),
       syncText: true,
     );
-  }
-
-  Future<EventPreset?> showPresetEditorDialog({
-    required String title,
-    EventPreset? preset,
-  }) async {
-    final nameController = TextEditingController(
-      text: preset?.name ?? eventName.text.trim(),
-    );
-    final roundLengthController = TextEditingController(
-      text: (preset?.roundLengthMinutes ??
-              clampInt(_readInt(roundLength, state.roundLengthMinutes), 5, 180))
-          .toString(),
-    );
-    final roundsController = TextEditingController(
-      text: (preset?.rounds ??
-              clampInt(_readInt(totalRounds, state.totalRounds), 1, 99))
-          .toString(),
-    );
-    final tablesController = TextEditingController(
-      text: preset?.tables ?? tableRange.text.trim(),
-    );
-    String selectedGame = preset?.game ?? state.game;
-    String selectedMatchFormat = preset?.matchFormat ?? state.matchFormat;
-
-    try {
-      return await showDialog<EventPreset>(
-        context: context,
-        builder: (dialogContext) {
-          return StatefulBuilder(
-            builder: (context, setDialogState) {
-              return AlertDialog(
-                title: Text(title),
-                content: SizedBox(
-                  width: 420,
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextField(
-                          controller: nameController,
-                          decoration: const InputDecoration(
-                            labelText: 'Preset name',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<String>(
-                          value: selectedGame,
-                          decoration: const InputDecoration(labelText: 'Game'),
-                          items: gameOptions
-                              .map(
-                                (game) => DropdownMenuItem(
-                                  value: game,
-                                  child: Text(game),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (value) {
-                            if (value == null) return;
-                            setDialogState(() => selectedGame = value);
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<String>(
-                          value: selectedMatchFormat,
-                          decoration:
-                              const InputDecoration(labelText: 'Match format'),
-                          items: matchFormatOptions
-                              .map(
-                                (format) => DropdownMenuItem(
-                                  value: format,
-                                  child: Text(format),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (value) {
-                            if (value == null) return;
-                            setDialogState(() => selectedMatchFormat = value);
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: roundLengthController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Round length in minutes',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: roundsController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Total rounds',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: tablesController,
-                          decoration: const InputDecoration(
-                            labelText: 'Tables used',
-                            hintText: '1-12 or 1-6,9-12',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: () {
-                      final presetName = nameController.text.trim().isEmpty
-                          ? 'New Event Preset'
-                          : nameController.text.trim();
-                      final presetRoundLength = clampInt(
-                        int.tryParse(roundLengthController.text.trim()) ??
-                            state.roundLengthMinutes,
-                        5,
-                        180,
-                      );
-                      final presetRounds = clampInt(
-                        int.tryParse(roundsController.text.trim()) ??
-                            state.totalRounds,
-                        1,
-                        99,
-                      );
-                      final presetTables = tablesController.text.trim().isEmpty
-                          ? '1-12'
-                          : tablesController.text.trim();
-
-                      Navigator.of(dialogContext).pop(
-                        EventPreset(
-                          presetName,
-                          selectedGame,
-                          selectedMatchFormat,
-                          presetRoundLength,
-                          presetRounds,
-                          presetTables,
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.save),
-                    label: const Text('Save Preset'),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      );
-    } finally {
-      nameController.dispose();
-      roundLengthController.dispose();
-      roundsController.dispose();
-      tablesController.dispose();
-    }
   }
 
   Future<void> saveCurrentSetupAsPreset() async {
@@ -597,73 +483,76 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     );
 
     await _setPresets([...presets, created]);
+    showMessage('Saved "${created.name}" as preset.');
   }
 
   Future<void> createPreset(EventPreset preset) async {
     await _setPresets([...presets, preset]);
   }
 
-  Future<void> updatePreset(int index, EventPreset preset) async {
-    if (index < 0 || index >= presets.length) return;
+  /// Replaces the preset with the same id. If it was deleted in the meantime,
+  /// the edit is kept as a new preset instead of overwriting another one.
+  Future<void> updatePreset(EventPreset preset) async {
+    final index = presets.indexWhere((item) => item.id == preset.id);
+    if (index < 0) {
+      await _setPresets([...presets, preset]);
+      return;
+    }
     final next = [...presets];
     next[index] = preset;
     await _setPresets(next);
   }
 
-  Future<void> deletePresetDirect(int index) async {
-    if (index < 0 || index >= presets.length) return;
-    final next = [...presets]..removeAt(index);
-    await _setPresets(next);
-  }
+  Future<void> deletePreset(String id) async {
+    final index = presets.indexWhere((item) => item.id == id);
+    if (index < 0) return;
 
-  Future<void> restoreDefaultPresetsDirect() async {
-    await _setPresets([...presets, ...EventPreset.defaultPresets()]);
-  }
+    final removed = presets[index];
+    await _setPresets([...presets]..removeAt(index));
 
-  Future<void> editPreset(int index) async {
-    if (index < 0 || index >= presets.length) return;
-
-    final edited = await showPresetEditorDialog(
-      preset: presets[index],
-      title: 'Edit preset',
+    showMessage(
+      'Deleted preset "${removed.name}".',
+      actionLabel: 'Undo',
+      onAction: () {
+        if (presets.any((item) => item.id == removed.id)) return;
+        final at = math.min(index, presets.length);
+        _setPresets([...presets]..insert(at, removed));
+      },
     );
-
-    if (edited == null) return;
-
-    final next = [...presets];
-    next[index] = edited;
-    await _setPresets(next);
-  }
-
-  Future<void> deletePreset(int index) async {
-    if (index < 0 || index >= presets.length) return;
-
-    final confirmed = await showConfirmDialog(
-      title: 'Delete preset?',
-      message:
-          'This will delete "${presets[index].name}" from your saved presets.',
-      confirmText: 'Delete Preset',
-      confirmColor: const Color(0xFFFB7185),
-    );
-
-    if (!confirmed) return;
-
-    final next = [...presets]..removeAt(index);
-    await _setPresets(next);
   }
 
   Future<void> restoreDefaultPresets() async {
-    final confirmed = await showConfirmDialog(
-      title: 'Restore default presets?',
-      message:
-          'This will add the default Big Ink presets back into your preset list.',
-      confirmText: 'Restore Defaults',
-      confirmColor: const Color(0xFF5FB3FF),
+    final missing = EventPreset.missingDefaults(presets);
+    if (missing.isEmpty) {
+      showMessage('All default presets are already in your list.');
+      return;
+    }
+    await _setPresets([...presets, ...missing]);
+    showMessage(
+      'Added ${missing.length} default preset${missing.length == 1 ? '' : 's'}.',
     );
+  }
 
-    if (!confirmed) return;
+  void showMessage(
+    String text, {
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    final messenger = messengerKey.currentState;
+    if (messenger == null) return;
 
-    await _setPresets([...presets, ...EventPreset.defaultPresets()]);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(text),
+          duration: const Duration(seconds: 8),
+          behavior: SnackBarBehavior.floating,
+          action: actionLabel == null || onAction == null
+              ? null
+              : SnackBarAction(label: actionLabel, onPressed: onAction),
+        ),
+      );
   }
 
   @override
@@ -677,6 +566,8 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
     );
 
     return MaterialApp(
+      navigatorKey: navigatorKey,
+      scaffoldMessengerKey: messengerKey,
       debugShowCheckedModeBanner: false,
       title: 'Big Ink TCG Timer',
       theme: theme,
@@ -743,8 +634,7 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
                               thirdPlace: thirdPlace,
                               onApplyReset: () =>
                                   applySettings(resetTimer: true),
-                              onApplySave: () =>
-                                  applySettings(resetTimer: false),
+                              onFieldChanged: scheduleAutosave,
                               onGameChanged: changeGame,
                               onMatchFormatChanged: changeMatchFormat,
                               onUseCustomLogoChanged: changeLogoMode,
@@ -769,8 +659,8 @@ class _BigInkTimerAppState extends State<BigInkTimerApp> {
                               onSaveCurrentPreset: saveCurrentSetupAsPreset,
                               onCreatePreset: createPreset,
                               onUpdatePreset: updatePreset,
-                              onDeletePreset: deletePresetDirect,
-                              onRestoreDefaults: restoreDefaultPresetsDirect,
+                              onDeletePreset: deletePreset,
+                              onRestoreDefaults: restoreDefaultPresets,
                             ),
                           ][page],
                         ),
@@ -797,7 +687,7 @@ class AdminTimerPage extends StatelessWidget {
     required this.secondPlace,
     required this.thirdPlace,
     required this.onApplyReset,
-    required this.onApplySave,
+    required this.onFieldChanged,
     required this.onGameChanged,
     required this.onMatchFormatChanged,
     required this.onUseCustomLogoChanged,
@@ -820,7 +710,7 @@ class AdminTimerPage extends StatelessWidget {
   final TextEditingController secondPlace;
   final TextEditingController thirdPlace;
   final Future<void> Function() onApplyReset;
-  final Future<void> Function() onApplySave;
+  final VoidCallback onFieldChanged;
   final Future<void> Function(String value) onGameChanged;
   final Future<void> Function(String value) onMatchFormatChanged;
   final Future<void> Function(bool value) onUseCustomLogoChanged;
@@ -940,35 +830,22 @@ class AdminTimerPage extends StatelessWidget {
                     children: [
                       TextField(
                         controller: eventName,
+                        onChanged: (_) => onFieldChanged(),
                         decoration:
                             const InputDecoration(labelText: 'Event name'),
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: state.game,
+                        value: normalizeGame(state.game),
                         decoration: const InputDecoration(labelText: 'Game'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'Disney Lorcana',
-                            child: Text('Disney Lorcana'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Pokémon',
-                            child: Text('Pokémon'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Magic Commander',
-                            child: Text('Magic Commander'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Yu-Gi-Oh!',
-                            child: Text('Yu-Gi-Oh!'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Random',
-                            child: Text('Random'),
-                          ),
-                        ],
+                        items: gameOptions
+                            .map(
+                              (game) => DropdownMenuItem(
+                                value: game,
+                                child: Text(game),
+                              ),
+                            )
+                            .toList(),
                         onChanged: (value) {
                           if (value != null) onGameChanged(value);
                         },
@@ -993,6 +870,7 @@ class AdminTimerPage extends StatelessWidget {
                       const SizedBox(height: 12),
                       TextField(
                         controller: roundLength,
+                        onChanged: (_) => onFieldChanged(),
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           labelText: 'Round length in minutes',
@@ -1004,6 +882,7 @@ class AdminTimerPage extends StatelessWidget {
                           Expanded(
                             child: TextField(
                               controller: currentRound,
+                              onChanged: (_) => onFieldChanged(),
                               keyboardType: TextInputType.number,
                               decoration: const InputDecoration(
                                 labelText: 'Current round',
@@ -1014,6 +893,7 @@ class AdminTimerPage extends StatelessWidget {
                           Expanded(
                             child: TextField(
                               controller: totalRounds,
+                              onChanged: (_) => onFieldChanged(),
                               keyboardType: TextInputType.number,
                               decoration: const InputDecoration(
                                 labelText: 'Total rounds',
@@ -1025,6 +905,7 @@ class AdminTimerPage extends StatelessWidget {
                       const SizedBox(height: 12),
                       TextField(
                         controller: tableRange,
+                        onChanged: (_) => onFieldChanged(),
                         decoration: const InputDecoration(
                           labelText: 'Tables used',
                           hintText: '1-12 or 1-6,9-12',
@@ -1033,6 +914,7 @@ class AdminTimerPage extends StatelessWidget {
                       const SizedBox(height: 12),
                       TextField(
                         controller: tableCount,
+                        onChanged: (_) => onFieldChanged(),
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           labelText: 'Total tables in store',
@@ -1073,6 +955,7 @@ class AdminTimerPage extends StatelessWidget {
                       const SizedBox(height: 12),
                       TextField(
                         controller: firstPlace,
+                        onChanged: (_) => onFieldChanged(),
                         decoration: const InputDecoration(
                           labelText: '1st place',
                           prefixIcon: Icon(Icons.looks_one_outlined),
@@ -1081,6 +964,7 @@ class AdminTimerPage extends StatelessWidget {
                       const SizedBox(height: 12),
                       TextField(
                         controller: secondPlace,
+                        onChanged: (_) => onFieldChanged(),
                         decoration: const InputDecoration(
                           labelText: '2nd place',
                           prefixIcon: Icon(Icons.looks_two_outlined),
@@ -1089,27 +973,36 @@ class AdminTimerPage extends StatelessWidget {
                       const SizedBox(height: 12),
                       TextField(
                         controller: thirdPlace,
+                        onChanged: (_) => onFieldChanged(),
                         decoration: const InputDecoration(
                           labelText: '3rd place',
                           prefixIcon: Icon(Icons.looks_3_outlined),
                         ),
                       ),
                       const SizedBox(height: 18),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: onApplyReset,
-                          icon: const Icon(Icons.check),
-                          label: const Text('Apply & Reset Timer'),
-                        ),
+                      const Row(
+                        children: [
+                          Icon(
+                            Icons.cloud_done_outlined,
+                            size: 18,
+                            color: Color(0xFF4ADE80),
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Changes are saved automatically. The running timer is not affected.',
+                              style: softText,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                          onPressed: onApplySave,
-                          icon: const Icon(Icons.save),
-                          label: const Text('Save Without Reset'),
+                          onPressed: onApplyReset,
+                          icon: const Icon(Icons.restart_alt),
+                          label: const Text('Reset Timer to Round Length'),
                         ),
                       ),
                     ],
@@ -1761,8 +1654,8 @@ class PresetsPage extends StatefulWidget {
   final Future<void> Function(EventPreset preset) onLoadPreset;
   final Future<void> Function() onSaveCurrentPreset;
   final Future<void> Function(EventPreset preset) onCreatePreset;
-  final Future<void> Function(int index, EventPreset preset) onUpdatePreset;
-  final Future<void> Function(int index) onDeletePreset;
+  final Future<void> Function(EventPreset preset) onUpdatePreset;
+  final Future<void> Function(String id) onDeletePreset;
   final Future<void> Function() onRestoreDefaults;
 
   @override
@@ -1777,7 +1670,9 @@ class _PresetsPageState extends State<PresetsPage> {
 
   String presetGame = 'Disney Lorcana';
   String presetMatchFormat = 'BO1';
-  int? editingIndex;
+  // The id of the preset being edited. An id stays valid when other presets
+  // are deleted, unlike a list index.
+  String? editingId;
 
   @override
   void dispose() {
@@ -1790,7 +1685,7 @@ class _PresetsPageState extends State<PresetsPage> {
 
   void clearEditor() {
     setState(() {
-      editingIndex = null;
+      editingId = null;
       presetName.clear();
       presetGame = 'Disney Lorcana';
       presetMatchFormat = 'BO1';
@@ -1800,13 +1695,11 @@ class _PresetsPageState extends State<PresetsPage> {
     });
   }
 
-  void startEditing(int index) {
-    if (index < 0 || index >= widget.presets.length) return;
-    final preset = widget.presets[index];
+  void startEditing(EventPreset preset) {
     setState(() {
-      editingIndex = index;
+      editingId = preset.id;
       presetName.text = preset.name;
-      presetGame = gameOptions.contains(preset.game) ? preset.game : 'Random';
+      presetGame = normalizeGame(preset.game);
       presetMatchFormat = matchFormatOptions.contains(preset.matchFormat)
           ? preset.matchFormat
           : 'BO1';
@@ -1840,20 +1733,25 @@ class _PresetsPageState extends State<PresetsPage> {
       roundLength,
       rounds,
       tables,
+      id: editingId,
     );
   }
 
   Future<void> saveEditorPreset() async {
     final preset = readEditorPreset();
-    final index = editingIndex;
 
-    if (index == null) {
+    if (editingId == null) {
       await widget.onCreatePreset(preset);
     } else {
-      await widget.onUpdatePreset(index, preset);
+      await widget.onUpdatePreset(preset);
     }
 
     clearEditor();
+  }
+
+  Future<void> deletePreset(EventPreset preset) async {
+    if (preset.id == editingId) clearEditor();
+    await widget.onDeletePreset(preset.id);
   }
 
   @override
@@ -1869,7 +1767,7 @@ class _PresetsPageState extends State<PresetsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  editingIndex == null ? 'Preset Editor' : 'Editing Preset',
+                  editingId == null ? 'Preset Editor' : 'Editing Preset',
                   style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.w900,
@@ -1877,7 +1775,7 @@ class _PresetsPageState extends State<PresetsPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  editingIndex == null
+                  editingId == null
                       ? 'Create a new preset here, or save your current timer setup directly.'
                       : 'Change the preset values and save them back into the selected preset.',
                   style: softText,
@@ -1987,7 +1885,7 @@ class _PresetsPageState extends State<PresetsPage> {
                       onPressed: saveEditorPreset,
                       icon: const Icon(Icons.save),
                       label: Text(
-                        editingIndex == null
+                        editingId == null
                             ? 'Save as New Preset'
                             : 'Save Edited Preset',
                       ),
@@ -2071,7 +1969,7 @@ class _PresetsPageState extends State<PresetsPage> {
                           children: [
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: () => startEditing(index),
+                                onPressed: () => startEditing(preset),
                                 icon: const Icon(Icons.edit_outlined),
                                 label: const Text('Edit'),
                               ),
@@ -2079,7 +1977,7 @@ class _PresetsPageState extends State<PresetsPage> {
                             const SizedBox(width: 10),
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: () => widget.onDeletePreset(index),
+                                onPressed: () => deletePreset(preset),
                                 icon: const Icon(Icons.delete_outline),
                                 label: const Text('Delete'),
                               ),
@@ -2237,6 +2135,7 @@ class TimerStateModel {
     required this.remainingSeconds,
     required this.running,
     required this.lastUpdateMillis,
+    this.endsAtMillis = 0,
   });
 
   factory TimerStateModel.defaults() {
@@ -2261,9 +2160,20 @@ class TimerStateModel {
   }
 
   factory TimerStateModel.fromJson(Map<String, dynamic> json) {
+    final running = json['running'] as bool? ?? false;
+    final remainingSeconds =
+        (json['remainingSeconds'] as num?)?.toInt() ?? 50 * 60;
+    final lastUpdateMillis = (json['lastUpdateMillis'] as num?)?.toInt() ??
+        DateTime.now().millisecondsSinceEpoch;
+
+    // Data saved before endsAtMillis existed: derive the end time the same
+    // way the old remainingSeconds + lastUpdateMillis pair implied it.
+    final endsAtMillis = (json['endsAtMillis'] as num?)?.toInt() ??
+        (running ? lastUpdateMillis + remainingSeconds * 1000 : 0);
+
     return TimerStateModel(
       eventName: json['eventName'] as String? ?? 'TCG Event',
-      game: json['game'] as String? ?? 'Disney Lorcana',
+      game: normalizeGame(json['game'] as String? ?? 'Disney Lorcana'),
       matchFormat:
           normalizeMatchFormat(json['matchFormat'] as String? ?? 'BO1'),
       roundLengthMinutes: (json['roundLengthMinutes'] as num?)?.toInt() ?? 50,
@@ -2276,10 +2186,10 @@ class TimerStateModel {
       firstPlace: json['firstPlace'] as String? ?? '',
       secondPlace: json['secondPlace'] as String? ?? '',
       thirdPlace: json['thirdPlace'] as String? ?? '',
-      remainingSeconds: (json['remainingSeconds'] as num?)?.toInt() ?? 50 * 60,
-      running: json['running'] as bool? ?? false,
-      lastUpdateMillis: (json['lastUpdateMillis'] as num?)?.toInt() ??
-          DateTime.now().millisecondsSinceEpoch,
+      remainingSeconds: remainingSeconds,
+      running: running,
+      lastUpdateMillis: lastUpdateMillis,
+      endsAtMillis: endsAtMillis,
     );
   }
 
@@ -2300,15 +2210,19 @@ class TimerStateModel {
   final bool running;
   final int lastUpdateMillis;
 
+  /// Wall-clock time (ms since epoch) at which a running timer reaches zero.
+  /// Only meaningful while [running]; paused timers use [remainingSeconds].
+  final int endsAtMillis;
+
   bool get isFinalRound => currentRound >= totalRounds;
 
   int get remainingNow {
     if (eventFinished) return 0;
     if (!running) return remainingSeconds < 0 ? 0 : remainingSeconds;
-    final elapsed =
-        ((DateTime.now().millisecondsSinceEpoch - lastUpdateMillis) / 1000)
-            .floor();
-    final value = remainingSeconds - elapsed;
+    final leftMillis = endsAtMillis - DateTime.now().millisecondsSinceEpoch;
+    // Round up so the display shows 00:01 until the very last moment and
+    // only reaches 00:00 when time is actually up.
+    final value = (leftMillis / 1000).ceil();
     return value < 0 ? 0 : value;
   }
 
@@ -2334,10 +2248,33 @@ class TimerStateModel {
     return const Color(0xFF4ADE80);
   }
 
-  TimerStateModel snapshot() => copyWith(
-        remainingSeconds: remainingNow,
-        lastUpdateMillis: DateTime.now().millisecondsSinceEpoch,
-      );
+  /// Sets the timer to [remainingSeconds] and starts or stops it.
+  TimerStateModel withTimer({
+    required bool running,
+    required int remainingSeconds,
+  }) {
+    final safe = remainingSeconds < 0 ? 0 : remainingSeconds;
+    return copyWith(
+      running: running,
+      remainingSeconds: safe,
+      endsAtMillis:
+          running ? DateTime.now().millisecondsSinceEpoch + safe * 1000 : 0,
+    );
+  }
+
+  /// Adds [seconds] (or removes them, if negative) without losing the
+  /// sub-second position of a running timer.
+  TimerStateModel adjustedBy(int seconds) {
+    if (!running) {
+      return withTimer(running: false, remainingSeconds: remainingNow + seconds);
+    }
+    final nextEnd = endsAtMillis + seconds * 1000;
+    return copyWith(
+      endsAtMillis: nextEnd,
+      remainingSeconds:
+          ((nextEnd - DateTime.now().millisecondsSinceEpoch) / 1000).ceil(),
+    );
+  }
 
   TimerStateModel withFreshTimestamp() =>
       copyWith(lastUpdateMillis: DateTime.now().millisecondsSinceEpoch);
@@ -2378,6 +2315,7 @@ class TimerStateModel {
         'thirdPlace': thirdPlace,
         'remainingSeconds': remainingNow,
         'running': running && remainingNow > 0 && !eventFinished,
+        'endsAtMillis': endsAtMillis,
         'lastUpdateMillis': DateTime.now().millisecondsSinceEpoch,
       };
 
@@ -2398,6 +2336,7 @@ class TimerStateModel {
     int? remainingSeconds,
     bool? running,
     int? lastUpdateMillis,
+    int? endsAtMillis,
   }) {
     return TimerStateModel(
       eventName: eventName ?? this.eventName,
@@ -2416,33 +2355,37 @@ class TimerStateModel {
       remainingSeconds: remainingSeconds ?? this.remainingSeconds,
       running: running ?? this.running,
       lastUpdateMillis: lastUpdateMillis ?? this.lastUpdateMillis,
+      endsAtMillis: endsAtMillis ?? this.endsAtMillis,
     );
   }
 }
 
 class EventPreset {
-  const EventPreset(
+  EventPreset(
     this.name,
     this.game,
     this.matchFormat,
     this.roundLengthMinutes,
     this.rounds,
-    this.tables,
-  );
+    this.tables, {
+    String? id,
+  }) : id = id ?? newPresetId();
 
   factory EventPreset.fromJson(Map<String, dynamic> json) {
     return EventPreset(
       json['name'] as String? ?? 'Event Preset',
-      json['game'] as String? ?? 'Disney Lorcana',
+      normalizeGame(json['game'] as String? ?? 'Disney Lorcana'),
       normalizeMatchFormat(json['matchFormat'] as String? ?? 'BO1'),
       (json['roundLengthMinutes'] as num?)?.toInt() ?? 50,
       (json['rounds'] as num?)?.toInt() ?? 4,
       json['tables'] as String? ?? '1-12',
+      // Presets saved before ids existed get a fresh one on load.
+      id: json['id'] as String?,
     );
   }
 
   static List<EventPreset> defaultPresets() {
-    return const [
+    return [
       EventPreset(
         'Lorcana Weekly League',
         'Disney Lorcana',
@@ -2450,12 +2393,43 @@ class EventPreset {
         50,
         4,
         '1-12',
+        id: 'default-lorcana-weekly',
       ),
-      EventPreset('Pokémon Casual Night', 'Pokémon', 'BO1', 30, 3, '13-20'),
-      EventPreset('Commander Night', 'Magic Commander', 'BO3', 60, 1, '1-8'),
+      EventPreset(
+        'Pokémon Casual Night',
+        'Pokémon',
+        'BO1',
+        30,
+        3,
+        '13-20',
+        id: 'default-pokemon-casual',
+      ),
+      EventPreset(
+        'Commander Night',
+        'Magic Commander',
+        'BO3',
+        60,
+        1,
+        '1-8',
+        id: 'default-commander-night',
+      ),
     ];
   }
 
+  /// Default presets that are not in [existing] yet, matched by id or by
+  /// name (older saved defaults have no fixed id).
+  static List<EventPreset> missingDefaults(List<EventPreset> existing) {
+    final ids = existing.map((preset) => preset.id).toSet();
+    final names = existing.map((preset) => preset.name).toSet();
+    return defaultPresets()
+        .where(
+          (preset) =>
+              !ids.contains(preset.id) && !names.contains(preset.name),
+        )
+        .toList();
+  }
+
+  final String id;
   final String name;
   final String game;
   final String matchFormat;
@@ -2464,6 +2438,7 @@ class EventPreset {
   final String tables;
 
   Map<String, dynamic> toJson() => {
+        'id': id,
         'name': name,
         'game': game,
         'matchFormat': matchFormat,
@@ -2485,6 +2460,20 @@ const gameOptions = [
 
 String normalizeMatchFormat(String value) {
   return matchFormatOptions.contains(value) ? value : 'BO1';
+}
+
+/// Maps unknown game names (old or edited saved data) to 'Random', so the
+/// game dropdowns always find their current value in the item list.
+String normalizeGame(String value) {
+  return gameOptions.contains(value) ? value : 'Random';
+}
+
+final _presetIdRandom = math.Random();
+
+String newPresetId() {
+  final time = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+  final salt = _presetIdRandom.nextInt(0x7fffffff).toRadixString(36);
+  return 'preset-$time-$salt';
 }
 
 const softText = TextStyle(color: Color(0xB3FFFFFF));

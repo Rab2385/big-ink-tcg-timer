@@ -261,6 +261,16 @@ flutter run -d chrome
 
 ---
 
+## Run tests
+
+`lib/main.dart` uses `dart:html`, so the tests run in Chrome:
+
+```powershell
+flutter test --platform chrome
+```
+
+---
+
 ## Build the Flutter web version
 
 ```powershell
